@@ -5,8 +5,16 @@
 
 export type UserRole = "admin" | "campus_manager" | "faculty" | "student";
 export type SaturdayRuleType = "ALL" | "NONE" | "SECOND_FOURTH";
-export type CalendarEventType = "HOLIDAY" | "INSTITUTIONAL_EVENT" | "EXAM_PERIOD" | "BLACKOUT";
 export type ExamTypeEnum = "SESSIONAL" | "MID_TERM" | "PUT" | "END_TERM";
+export type CalendarEventType =
+  | "HOLIDAY"
+  | "ACADEMIC_EVENT"
+  | "INSTITUTIONAL_EVENT"
+  | "SPECIAL_WORKING_DAY"
+  | "EXAM_PERIOD"
+  | "CANCELLED_DAY"
+  | "TIMETABLE_OVERRIDE"
+  | "BLACKOUT";
 export type TopicProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "SKIPPED";
 export type ScheduledOccurrenceStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED" | "RESCHEDULED";
 export type SessionDeliveryStatus = "COMPLETED" | "IN_PROGRESS" | "SKIPPED" | "MERGED" | "CANCELLED";
@@ -61,6 +69,9 @@ export interface DbSemester {
   end_date: string;
   saturday_rule: SaturdayRuleType;
   is_current: boolean;
+  is_published?: boolean;
+  published_at?: string | null;
+  published_by?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -111,7 +122,11 @@ export interface DbCalendarEvent {
   end_date: string;
   is_instructional: boolean;
   description?: string | null;
+  change_reason?: string | null;
+  is_recurring?: boolean;
+  recurring_pattern?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 // 9. exam_windows
@@ -123,7 +138,12 @@ export interface DbExamWindow {
   start_date: string;
   end_date: string;
   weightage_percent: number;
+  campus_id?: string | null;
+  track_id?: string | null;
+  batch_id?: string | null;
+  subject_id?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 // 10. faculty_assignments

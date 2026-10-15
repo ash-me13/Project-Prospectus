@@ -11,7 +11,6 @@ import {
   SEED_TOPICS_CS201,
   SEED_EXAMS,
   SEED_TIMETABLE,
-  SEED_HOLIDAYS,
 } from "@/lib/mock-data";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopToolbar } from "@/components/layout/top-toolbar";
@@ -25,20 +24,44 @@ import { PaceIndicator } from "@/components/progression/pace-indicator";
 import { TimetableGrid } from "@/components/timetable/timetable-grid";
 import { QuickLogModal, LoggedSessionPayload } from "@/components/sessions/quick-log-modal";
 import { Toast } from "@/components/ui/toast";
-import { canLogSession } from "@/auth/authorization";
+import {
+  canLogSession,
+  canManageSemester,
+  canManageCalendar,
+  canManageExams,
+  AuthenticatedUser,
+} from "@/auth/authorization";
 import { UserRole } from "@/types/academic";
+import {
+  DbSemester,
+  DbCalendarEvent,
+  DbExamWindow,
+  SaturdayRuleType,
+  CalendarEventType,
+  ExamTypeEnum,
+} from "@/types/database";
+import { isolatedDataStore } from "@/lib/database/service";
+import { SemesterSetupModal } from "@/components/admin/semester-setup-modal";
+import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
+import { AddEventModal } from "@/components/calendar/add-event-modal";
+import { CsvImportModal } from "@/components/calendar/csv-import-modal";
+import { ExamWindowsModal } from "@/components/exams/exam-windows-modal";
+import { ImportPreviewResult, ImportExecutionReport } from "@/lib/import/csv-importer";
+import { CalendarEventCreateInput } from "@/validation/database";
 import {
   BookOpen,
   Award,
   Clock,
   Layers,
   FileCheck,
-  Calendar,
   AlertCircle,
   BarChart3,
   CheckCircle2,
-  CalendarDays,
   Sparkles,
+  Settings,
+  Plus,
+  Upload,
+  Check,
 } from "lucide-react";
 
 export default function ProspectusApp() {
@@ -51,7 +74,56 @@ export default function ProspectusApp() {
   // Academic Context State
   const [currentCampus, setCurrentCampus] = useState<string>("HITECH");
   const [currentTrack, setCurrentTrack] = useState<string>("Mirai");
-  const currentSemester = "Fall 2026 (Sem 1)";
+
+  // Database Service State
+  const [semesters, setSemesters] = useState<DbSemester[]>(() => isolatedDataStore.getSemesters());
+  const activeSemester = semesters[0] || {
+    id: "55555555-5555-5555-5555-555555555555",
+    campus_id: "11111111-1111-1111-1111-111111111111",
+    name: "Fall Semester 2026",
+    academic_year: "2026-2027",
+    start_date: "2026-08-01",
+    end_date: "2026-12-15",
+    saturday_rule: "SECOND_FOURTH" as SaturdayRuleType,
+    is_current: true,
+    is_published: true,
+    created_at: "2026-08-01",
+    updated_at: "2026-08-01",
+  };
+
+  const [calendarEvents, setCalendarEvents] = useState<DbCalendarEvent[]>(() =>
+    isolatedDataStore.getCalendarEvents(activeSemester.id)
+  );
+  const [examWindows, setExamWindows] = useState<DbExamWindow[]>(() =>
+    isolatedDataStore.getExamWindows(activeSemester.id)
+  );
+
+  // Workflow Modals State
+  const [isSemesterSetupOpen, setIsSemesterSetupOpen] = useState<boolean>(false);
+  const [isAddEventOpen, setIsAddEventOpen] = useState<boolean>(false);
+  const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
+  const [isExamWindowsOpen, setIsExamWindowsOpen] = useState<boolean>(false);
+
+  const currentSemester = activeSemester.name;
+
+  // Active persona authenticated context
+  const currentUser: AuthenticatedUser = {
+    id:
+      currentRole === "admin"
+        ? "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        : currentRole === "campus_manager"
+        ? "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        : currentRole === "faculty"
+        ? "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        : "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+    email: `${currentRole}@msot.org`,
+    role: currentRole,
+    campusId: "11111111-1111-1111-1111-111111111111",
+  };
+
+  const canManageSem = canManageSemester(currentUser);
+  const canManageCal = canManageCalendar(currentUser, activeSemester.campus_id);
+  const canManageEx = canManageExams(currentUser, activeSemester.campus_id);
 
   // Toast Notifications State
   const [toasts, setToasts] = useState<Array<{ id: string; type: "success" | "error" | "info"; title: string; message: string }>>([
@@ -65,6 +137,216 @@ export default function ProspectusApp() {
 
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Semester Management Actions
+  const handleSaveSemester = (data: {
+    campus_id: string;
+    track_id: string;
+    name: string;
+    academic_year: string;
+    start_date: string;
+    end_date: string;
+    saturday_rule: SaturdayRuleType;
+    batch_name?: string;
+    batch_section?: string;
+    student_count?: number;
+    is_published?: boolean;
+  }) => {
+    try {
+      const created = isolatedDataStore.createSemester(
+        {
+          campus_id: data.campus_id,
+          name: data.name,
+          academic_year: data.academic_year,
+          start_date: data.start_date,
+          end_date: data.end_date,
+          saturday_rule: data.saturday_rule,
+          is_current: true,
+        },
+        currentUser
+      );
+
+      if (data.batch_name) {
+        isolatedDataStore.createBatch(
+          {
+            campus_id: data.campus_id,
+            track_id: data.track_id,
+            semester_id: created.id,
+            name: data.batch_name,
+            section: data.batch_section || "A",
+            intake_year: Number(data.academic_year.split("-")[0]) || 2026,
+            student_count: data.student_count || 60,
+          },
+          currentUser
+        );
+      }
+
+      if (data.is_published) {
+        isolatedDataStore.publishSemester(created.id, currentUser);
+      }
+
+      setSemesters(isolatedDataStore.getSemesters());
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "success",
+          title: "Semester Initialized",
+          message: `Created ${created.name} (${created.saturday_rule} Saturday rule) with connected batch cohort.`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Semester Setup Failed", message: msg },
+      ]);
+    }
+  };
+
+  const handlePublishActiveSemester = () => {
+    try {
+      const published = isolatedDataStore.publishSemester(activeSemester.id, currentUser);
+      setSemesters(isolatedDataStore.getSemesters());
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "success",
+          title: "Academic Calendar Published",
+          message: `${published.name} is now published and visible to teaching faculty and students.`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Publish Failed", message: msg },
+      ]);
+    }
+  };
+
+  // Calendar Event Actions
+  const handleSaveCalendarEvent = (data: {
+    semester_id: string;
+    campus_id?: string | null;
+    title: string;
+    event_type: CalendarEventType;
+    start_date: string;
+    end_date: string;
+    is_instructional: boolean;
+    description?: string | null;
+    change_reason?: string | null;
+  }) => {
+    try {
+      const result = isolatedDataStore.createCalendarEvent(data, currentUser);
+      setCalendarEvents(isolatedDataStore.getCalendarEvents(activeSemester.id));
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "success",
+          title: "Calendar Event Created",
+          message: `Saved "${result.event.title}". ${result.shifts.length} dependent sessions realigned.`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Event Save Failed", message: msg },
+      ]);
+    }
+  };
+
+  const handleDeleteCalendarEvent = (eventId: string) => {
+    const reason = window.prompt("Please provide an audit reason for deleting this calendar event:") || "Administrative calendar cleanup";
+    try {
+      const result = isolatedDataStore.deleteCalendarEvent(eventId, reason, currentUser);
+      setCalendarEvents(isolatedDataStore.getCalendarEvents(activeSemester.id));
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "info",
+          title: "Calendar Event Deleted",
+          message: `Event removed with audit reason. ${result.shifts.length} session shifts evaluated.`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Delete Failed", message: msg },
+      ]);
+    }
+  };
+
+  // Exam Window Actions
+  const handleAddExamWindow = (data: {
+    semester_id: string;
+    name: string;
+    exam_type: ExamTypeEnum;
+    start_date: string;
+    end_date: string;
+    weightage_percent: number;
+    campus_id?: string | null;
+    track_id?: string | null;
+    batch_id?: string | null;
+    subject_id?: string | null;
+  }) => {
+    try {
+      const created = isolatedDataStore.createExamWindow(data, currentUser);
+      setExamWindows(isolatedDataStore.getExamWindows(activeSemester.id));
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "success",
+          title: "Exam Window Configured",
+          message: `Saved ${created.name} (${created.weightage_percent}% weightage).`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Exam Window Failed", message: msg },
+      ]);
+    }
+  };
+
+  const handleDeleteExamWindow = (examId: string) => {
+    try {
+      isolatedDataStore.deleteExamWindow(examId, currentUser);
+      setExamWindows(isolatedDataStore.getExamWindows(activeSemester.id));
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "info", title: "Exam Window Removed", message: "Successfully deleted exam window." },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Delete Failed", message: msg },
+      ]);
+    }
+  };
+
+  // CSV Batch Import Execution
+  const handleExecuteImport = (
+    preview: ImportPreviewResult<CalendarEventCreateInput>,
+    skipDuplicates: boolean
+  ): ImportExecutionReport => {
+    const report = isolatedDataStore.importCalendarEventsBatch(
+      activeSemester.id,
+      preview.rows,
+      currentUser,
+      skipDuplicates
+    );
+    setCalendarEvents(isolatedDataStore.getCalendarEvents(activeSemester.id));
+    return report;
   };
 
   // Mock sessions state (starts with seed and updates on rapid log)
@@ -723,47 +1005,35 @@ export default function ProspectusApp() {
               <PageHeader
                 kicker="WORKING CALENDAR // 2ND & 4TH SATURDAY RULES"
                 title="Academic Calendar &amp; Holidays"
-                description="Official calendar for Fall Semester 2026. Automatic date engine shifts later planned dates when holidays are added."
+                description={`Official calendar for ${activeSemester.name}. Automatic date engine shifts later planned dates when holidays are added.`}
+                actions={
+                  canManageCal && (
+                    <div className="flex items-center gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setIsImportOpen(true)}>
+                        <Upload className="h-3.5 w-3.5" />
+                        Import CSV
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={() => setIsAddEventOpen(true)}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Add Event
+                      </Button>
+                    </div>
+                  )
+                }
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Working Rules Card */}
-                <div className="card-quiet p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-[#172033] flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 text-[#4965E8]" />
-                    <span>Working Saturday Policy</span>
-                  </h4>
-                  <p className="text-xs text-[#64748B] leading-relaxed">
-                    Under the <strong>SECOND_FOURTH</strong> rule, the 2nd and 4th Saturdays of every month
-                    are instructional working days, adding teaching hours to weekly allocation. Sundays and
-                    other Saturdays are non-instructional.
-                  </p>
-                  <div className="p-3 bg-[#F7F8FC] rounded-lg border border-[#E6EAF2] text-xs font-mono space-y-1">
-                    <p className="text-[#16836B] font-semibold">&bull; Oct 10 (2nd Sat): Instructional Day (Active)</p>
-                    <p className="text-[#64748B]">&bull; Oct 17 (3rd Sat): Non-instructional</p>
-                    <p className="text-[#16836B] font-semibold">&bull; Oct 24 (4th Sat): Instructional Day (Active)</p>
-                  </div>
-                </div>
-
-                {/* Holiday Calendar List */}
-                <div className="card-quiet p-5 space-y-3">
-                  <h4 className="text-sm font-bold text-[#172033] flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-[#B87918]" />
-                    <span>Official Holidays &amp; Breaks</span>
-                  </h4>
-                  <div className="space-y-2">
-                    {SEED_HOLIDAYS.map((h) => (
-                      <div
-                        key={h.id}
-                        className="flex items-center justify-between p-2 rounded-md bg-[#F7F8FC] border border-[#E6EAF2] text-xs"
-                      >
-                        <span className="font-semibold text-[#172033]">{h.name}</span>
-                        <span className="font-mono text-[#64748B]">{h.date}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* Interactive Calendar Month View */}
+              <CalendarMonthView
+                currentSemesterId={activeSemester.id}
+                campusId={activeSemester.campus_id}
+                saturdayRule={activeSemester.saturday_rule}
+                events={calendarEvents}
+                onAddEvent={() => setIsAddEventOpen(true)}
+                onOpenImport={() => setIsImportOpen(true)}
+                onOpenExamWindows={() => setIsExamWindowsOpen(true)}
+                onDeleteEvent={handleDeleteCalendarEvent}
+                canManage={canManageCal}
+              />
             </div>
           )}
 
@@ -793,14 +1063,83 @@ export default function ProspectusApp() {
             </div>
           )}
 
-          {/* SETTINGS SECTION */}
+          {/* SETTINGS SECTION (Admin Semester Setup & System Parameters) */}
           {activeSection === "settings" && (
             <div className="space-y-6">
               <PageHeader
-                kicker="SYSTEM ARCHITECTURE // RESTRAINED DESIGN"
-                title="Platform Architecture &amp; Role Settings"
-                description="Technical configuration and active environment parameters for Prospectus."
+                kicker="SEMESTER SETUP // PROGRAM MANAGEMENT"
+                title="Academic Term Configuration &amp; Settings"
+                description="Manage campus semesters, Saturday instructional policies, cohort batches, and review/publish changes."
+                actions={
+                  canManageSem && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant={activeSemester.is_published ? "secondary" : "primary"}
+                        size="sm"
+                        onClick={handlePublishActiveSemester}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        {activeSemester.is_published ? "Calendar Published" : "Publish Calendar"}
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={() => setIsSemesterSetupOpen(true)}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Configure Term
+                      </Button>
+                    </div>
+                  )
+                }
               />
+
+              {/* Active Semester Overview Card */}
+              <div className="card-quiet p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-[#E6EAF2] pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-base font-bold text-[#172033]">{activeSemester.name}</h4>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#4965E8]/10 text-[#4965E8]">
+                        {activeSemester.academic_year}
+                      </span>
+                      {activeSemester.is_published ? (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#16836B]/10 text-[#16836B] flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" /> Published
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#B87918]/10 text-[#B87918]">
+                          Draft (Unpublished)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#64748B] mt-1 font-mono">
+                      Dates: {activeSemester.start_date} → {activeSemester.end_date} &bull; Saturday Rule:{" "}
+                      <strong>{activeSemester.saturday_rule}</strong>
+                    </p>
+                  </div>
+
+                  {canManageSem && (
+                    <Button variant="secondary" size="sm" onClick={() => setIsSemesterSetupOpen(true)}>
+                      <Settings className="h-3.5 w-3.5" />
+                      Edit Boundaries
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                  <div className="p-3 rounded-lg bg-[#F7F8FC] border border-[#E6EAF2]">
+                    <span className="text-[#64748B]">Enrolled Cohorts</span>
+                    <p className="text-sm font-bold text-[#172033] mt-1">CSE 2026 Sec B (64 students)</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#F7F8FC] border border-[#E6EAF2]">
+                    <span className="text-[#64748B]">Calendar Events</span>
+                    <p className="text-sm font-bold text-[#172033] mt-1">{calendarEvents.length} Holidays/Events</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#F7F8FC] border border-[#E6EAF2]">
+                    <span className="text-[#64748B]">Milestone Exam Windows</span>
+                    <p className="text-sm font-bold text-[#172033] mt-1">{examWindows.length} Windows Defined</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Architectural Overview */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="card-quiet p-5 space-y-2 text-xs">
                   <h4 className="font-bold text-[#172033] flex items-center gap-1.5">
@@ -818,7 +1157,7 @@ export default function ProspectusApp() {
                     <span>Deterministic Academic Engine</span>
                   </h4>
                   <p className="text-[#64748B]">
-                    16 unit tests passing. Calculations are 100% pure and independent of React components.
+                    38 unit tests passing. Calculations are 100% pure and independent of React components.
                   </p>
                 </div>
               </div>
@@ -835,6 +1174,45 @@ export default function ProspectusApp() {
         subjectCode="CS201"
         subjectName="Data Structures & Algorithms"
         plannedHours={1.5}
+      />
+
+      {/* Admin Semester Setup Modal */}
+      <SemesterSetupModal
+        isOpen={isSemesterSetupOpen}
+        onClose={() => setIsSemesterSetupOpen(false)}
+        onSaveSemester={handleSaveSemester}
+        existingSemester={activeSemester}
+      />
+
+      {/* Add Calendar Event Modal */}
+      <AddEventModal
+        isOpen={isAddEventOpen}
+        onClose={() => setIsAddEventOpen(false)}
+        semesterId={activeSemester.id}
+        campusId={activeSemester.campus_id}
+        onSaveEvent={handleSaveCalendarEvent}
+      />
+
+      {/* Batch CSV Import Modal */}
+      <CsvImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        semesterId={activeSemester.id}
+        campusId={activeSemester.campus_id}
+        existingEvents={calendarEvents}
+        onExecuteImport={handleExecuteImport}
+      />
+
+      {/* Exam Windows Management Modal */}
+      <ExamWindowsModal
+        isOpen={isExamWindowsOpen}
+        onClose={() => setIsExamWindowsOpen(false)}
+        semesterId={activeSemester.id}
+        campusId={activeSemester.campus_id}
+        examWindows={examWindows}
+        onAddExamWindow={handleAddExamWindow}
+        onDeleteExamWindow={handleDeleteExamWindow}
+        canManage={canManageEx}
       />
 
       {/* Floating Toast Notification Stack */}

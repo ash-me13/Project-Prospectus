@@ -69,6 +69,45 @@ export function canEditLessonPlan(
 }
 
 /**
+ * Checks if a user is permitted to create, edit, or publish semesters.
+ * Admin / Program Manager exclusive workflow.
+ */
+export function canManageSemester(user: AuthenticatedUser): boolean {
+  return user.role === "admin";
+}
+
+/**
+ * Checks if a user can add, edit, remove, or import calendar events for a campus.
+ * Authorized for Admin (platform-wide) and Campus Manager (assigned campus).
+ */
+export function canManageCalendar(
+  user: AuthenticatedUser,
+  targetCampusId?: string | null
+): boolean {
+  if (user.role === "admin") return true;
+  if (user.role === "campus_manager") {
+    if (!targetCampusId) return true;
+    return user.campusId === targetCampusId;
+  }
+  return false;
+}
+
+/**
+ * Checks if a user can create or configure exam windows.
+ */
+export function canManageExams(
+  user: AuthenticatedUser,
+  targetCampusId?: string | null
+): boolean {
+  if (user.role === "admin") return true;
+  if (user.role === "campus_manager") {
+    if (!targetCampusId) return true;
+    return user.campusId === targetCampusId;
+  }
+  return false;
+}
+
+/**
  * Server-side authorization guard assertion.
  */
 export function assertAuthorized(
@@ -79,3 +118,4 @@ export function assertAuthorized(
     throw new AuthorizationError(errorMessage);
   }
 }
+

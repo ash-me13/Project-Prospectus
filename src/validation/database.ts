@@ -2,7 +2,16 @@ import { z } from "zod";
 
 export const UserRoleEnum = z.enum(["admin", "campus_manager", "faculty", "student"]);
 export const SaturdayRuleEnum = z.enum(["ALL", "NONE", "SECOND_FOURTH"]);
-export const CalendarEventTypeEnum = z.enum(["HOLIDAY", "INSTITUTIONAL_EVENT", "EXAM_PERIOD", "BLACKOUT"]);
+export const CalendarEventTypeEnum = z.enum([
+  "HOLIDAY",
+  "ACADEMIC_EVENT",
+  "INSTITUTIONAL_EVENT",
+  "SPECIAL_WORKING_DAY",
+  "EXAM_PERIOD",
+  "CANCELLED_DAY",
+  "TIMETABLE_OVERRIDE",
+  "BLACKOUT",
+]);
 export const ExamTypeEnum = z.enum(["SESSIONAL", "MID_TERM", "PUT", "END_TERM"]);
 export const TopicProgressStatusEnum = z.enum(["NOT_STARTED", "IN_PROGRESS", "COMPLETED", "SKIPPED"]);
 export const ScheduledOccurrenceStatusEnum = z.enum(["SCHEDULED", "COMPLETED", "CANCELLED", "RESCHEDULED"]);
@@ -127,3 +136,56 @@ export type SessionLogCreateInput = z.infer<typeof SessionLogCreateSchema>;
 export type TimetableSlotCreateInput = z.infer<typeof TimetableSlotCreateSchema>;
 export type SyllabusTopicCreateInput = z.infer<typeof SyllabusTopicCreateSchema>;
 export type SemesterCreateInput = z.infer<typeof SemesterCreateSchema>;
+
+// 8. Calendar Event Schema
+export const CalendarEventCreateSchema = z.object({
+  semester_id: uuidSchema("Semester ID required"),
+  campus_id: uuidSchema().optional().nullable(),
+  title: z.string().min(2, "Event title required"),
+  event_type: CalendarEventTypeEnum.default("HOLIDAY"),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  is_instructional: z.boolean().default(false),
+  description: z.string().optional().nullable(),
+  change_reason: z.string().optional().nullable(),
+  is_recurring: z.boolean().default(false),
+  recurring_pattern: z.string().optional().nullable(),
+}).refine((data) => data.start_date <= data.end_date, {
+  message: "Start date must be on or before end date",
+  path: ["end_date"],
+});
+
+export type CalendarEventCreateInput = z.infer<typeof CalendarEventCreateSchema>;
+
+// 9. Exam Window Schema
+export const ExamWindowCreateSchema = z.object({
+  semester_id: uuidSchema("Semester ID required"),
+  name: z.string().min(2, "Exam window name required"),
+  exam_type: ExamTypeEnum,
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD"),
+  weightage_percent: z.number().min(0).max(100).default(25.0),
+  campus_id: uuidSchema().optional().nullable(),
+  track_id: uuidSchema().optional().nullable(),
+  batch_id: uuidSchema().optional().nullable(),
+  subject_id: uuidSchema().optional().nullable(),
+}).refine((data) => data.start_date <= data.end_date, {
+  message: "Exam start date must be on or before end date",
+  path: ["end_date"],
+});
+
+export type ExamWindowCreateInput = z.infer<typeof ExamWindowCreateSchema>;
+
+// 10. Batch Create Schema
+export const BatchCreateSchema = z.object({
+  campus_id: uuidSchema("Campus ID required"),
+  track_id: uuidSchema("Track ID required"),
+  semester_id: uuidSchema("Semester ID required"),
+  name: z.string().min(2, "Batch name required"),
+  section: z.string().min(1).max(5),
+  intake_year: z.number().int().min(2020).max(2035),
+  student_count: z.number().int().min(1).default(60),
+});
+
+export type BatchCreateInput = z.infer<typeof BatchCreateSchema>;
+
