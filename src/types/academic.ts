@@ -157,6 +157,8 @@ export interface ExamReadinessMetrics {
   coveredInScopeHours: number;
   readinessPercentage: number;
   remainingHoursNeeded: number;
+  availableHoursBeforeExam?: number;
+  readinessStatus: "READY" | "ON_TRACK" | "AT_RISK";
   isReady: boolean;
 }
 
@@ -168,4 +170,12 @@ export interface RolledUpTrackProgress {
   dangerSubjectsCount: number;
   tightSubjectsCount: number;
   onTrackSubjectsCount: number;
+}
+
+export interface RolledUpCampusProgress {
+  campusName: string;
+  totalTracks: number;
+  totalSubjects: number;
+  worstStatus: ProgressStatus;
+  trackSummaries: RolledUpTrackProgress[];
 }
