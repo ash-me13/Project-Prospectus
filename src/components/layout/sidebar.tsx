@@ -13,6 +13,7 @@ import {
   GraduationCap,
   Briefcase,
   UserCheck,
+  Database,
 } from "lucide-react";
 import { UserRole } from "@/types/academic";
 
@@ -189,12 +190,19 @@ export function Sidebar({
       </div>
 
       {/* Footer System Status */}
-      <div className="p-4 border-t border-[#E6EAF2] text-[11px] text-[#64748B] space-y-1">
+      <div className="p-4 border-t border-[#E6EAF2] text-[11px] text-[#64748B] space-y-1.5">
         <div className="flex items-center justify-between">
           <span>Engine Status</span>
           <span className="flex items-center gap-1 text-[#16836B] font-medium">
             <span className="h-1.5 w-1.5 rounded-full bg-[#16836B]" />
-            16 / 16 Tests
+            27 / 27 Tests
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>Database</span>
+          <span className="flex items-center gap-1 text-[#4965E8] font-medium">
+            <Database className="h-3 w-3" />
+            20 Tables (RLS)
           </span>
         </div>
         <p className="text-[10px] text-[#64748B]/70">Quiet Precision v1.0 &bull; 8pt Grid</p>
