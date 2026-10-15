@@ -10,7 +10,6 @@ import {
   SEED_SUBJECTS,
   SEED_TOPICS_CS201,
   SEED_EXAMS,
-  SEED_TIMETABLE,
 } from "@/lib/mock-data";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopToolbar } from "@/components/layout/top-toolbar";
@@ -46,6 +45,10 @@ import { CalendarMonthView } from "@/components/calendar/calendar-month-view";
 import { AddEventModal } from "@/components/calendar/add-event-modal";
 import { CsvImportModal } from "@/components/calendar/csv-import-modal";
 import { ExamWindowsModal } from "@/components/exams/exam-windows-modal";
+import { TimetableEditorModal } from "@/components/timetable/timetable-editor-modal";
+import { LessonPlanModal } from "@/components/syllabus/lesson-plan-modal";
+import { SyllabusCsvImportModal } from "@/components/syllabus/syllabus-csv-import-modal";
+import { PlanTimelinePreview } from "@/components/syllabus/plan-timeline-preview";
 import { ImportPreviewResult, ImportExecutionReport } from "@/lib/import/csv-importer";
 import { CalendarEventCreateInput } from "@/validation/database";
 import {
@@ -103,6 +106,10 @@ export default function ProspectusApp() {
   const [isAddEventOpen, setIsAddEventOpen] = useState<boolean>(false);
   const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
   const [isExamWindowsOpen, setIsExamWindowsOpen] = useState<boolean>(false);
+  const [isTimetableEditorOpen, setIsTimetableEditorOpen] = useState<boolean>(false);
+  const [isLessonPlanOpen, setIsLessonPlanOpen] = useState<boolean>(false);
+  const [isSyllabusImportOpen, setIsSyllabusImportOpen] = useState<boolean>(false);
+  const [selectedSubjectId] = useState<string>("88888888-8888-8888-8888-888888888881");
 
   const currentSemester = activeSemester.name;
 
@@ -334,6 +341,28 @@ export default function ProspectusApp() {
     }
   };
 
+  const handleDeleteSlot = (slotId: string) => {
+    try {
+      isolatedDataStore.deleteTimetableSlot(slotId, currentUser, "Removed via Timetable grid");
+      setTimetableSlotsVersion((v) => v + 1);
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `del-slot-${Date.now()}`,
+          type: "success",
+          title: "Timetable Slot Removed",
+          message: "Slot deleted and syllabus planned dates automatically recalculated.",
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        { id: `toast-${Date.now()}`, type: "error", title: "Slot Deletion Failed", message: msg },
+      ]);
+    }
+  };
+
   // CSV Batch Import Execution
   const handleExecuteImport = (
     preview: ImportPreviewResult<CalendarEventCreateInput>,
@@ -441,17 +470,23 @@ export default function ProspectusApp() {
     },
   ];
 
-  // Timetable Slots View
-  const timetableSlots = SEED_TIMETABLE.map((slot) => ({
-    id: slot.id,
-    dayOfWeek: slot.dayOfWeek,
-    subjectCode: "CS201",
-    subjectName: "Data Structures & Algorithms",
-    facultyName: "Dr. Neha Sharma",
-    startTime: slot.startTime,
-    endTime: slot.endTime,
-    durationHours: slot.durationHours,
-  }));
+  // Dynamic Timetable Slots from Data Store
+  const [timetableSlotsVersion, setTimetableSlotsVersion] = useState<number>(0);
+  const dbSlots = isolatedDataStore.getTimetableSlots();
+  const timetableSlots = dbSlots.map((slot) => {
+    const bs = isolatedDataStore.getBatchSubjects().find((b) => b.id === slot.batch_subject_id);
+    const sub = isolatedDataStore.getSubjects().find((subj) => subj.id === bs?.subject_id);
+    return {
+      id: slot.id,
+      dayOfWeek: slot.day_of_week,
+      subjectCode: sub?.code || "CS201",
+      subjectName: sub?.name || "Data Structures & Algorithms",
+      facultyName: "Dr. Neha Sharma",
+      startTime: slot.start_time,
+      endTime: slot.end_time,
+      durationHours: slot.duration_hours,
+    };
+  });
 
   // Handle Fast Session Logging
   const handleSessionLogged = (data: LoggedSessionPayload) => {
@@ -695,6 +730,7 @@ export default function ProspectusApp() {
 
               {/* Signature Visual Element 3: Weekly Timetable Grid */}
               <TimetableGrid
+                key={timetableSlotsVersion}
                 slots={timetableSlots}
                 saturdayRuleLabel="2nd & 4th Sat Working"
               />
@@ -774,9 +810,29 @@ export default function ProspectusApp() {
               <PageHeader
                 kicker="SCHEDULE ALLOCATION // WORKING CALENDAR"
                 title="Campus Timetable &amp; Capacity Allocation"
-                description="Visual schedule mapping Monday through Saturday with working Saturday rules and instructional holidays."
+                description="Visual schedule mapping Monday through Saturday with working Saturday rules, conflict validation, and exact duration calculations."
+                actions={
+                  (currentUser.role === "admin" || currentUser.role === "campus_manager") && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => setIsTimetableEditorOpen(true)}
+                    >
+                      <Plus className="h-4 w-4 mr-1.5" />
+                      Configure Slot
+                    </Button>
+                  )
+                }
               />
-              <TimetableGrid slots={timetableSlots} saturdayRuleLabel="2nd & 4th Sat Working" />
+              <TimetableGrid
+                key={`tt-${timetableSlotsVersion}`}
+                slots={timetableSlots}
+                saturdayRuleLabel="2nd & 4th Sat Working"
+                canEdit={currentUser.role === "admin" || currentUser.role === "campus_manager"}
+                onAddSlot={() => setIsTimetableEditorOpen(true)}
+                onDeleteSlot={handleDeleteSlot}
+              />
+              <PlanTimelinePreview subjectId={selectedSubjectId} />
             </div>
           )}
 
@@ -789,10 +845,24 @@ export default function ProspectusApp() {
                 description="Weight-based planned topics. Sessions run 50 minutes to 2 hours; every percentage is weighted by planned hours."
                 actions={
                   canUserLog && (
-                    <Button variant="secondary" size="sm">
-                      <FileCheck className="h-4 w-4 mr-1.5 text-[#4965E8]" />
-                      Import Syllabus (CSV/Excel)
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setIsSyllabusImportOpen(true)}
+                      >
+                        <FileCheck className="h-4 w-4 mr-1.5 text-[#4965E8]" />
+                        Import Syllabus (CSV)
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => setIsLessonPlanOpen(true)}
+                      >
+                        <BookOpen className="h-4 w-4 mr-1.5" />
+                        Edit Lesson Plan &amp; Topics
+                      </Button>
+                    </div>
                   )
                 }
               />
@@ -857,6 +927,8 @@ export default function ProspectusApp() {
                     </TableBody>
                   </Table>
                 </div>
+
+                <PlanTimelinePreview subjectId={selectedSubjectId} />
               </div>
             </div>
           )}
@@ -1213,6 +1285,65 @@ export default function ProspectusApp() {
         onAddExamWindow={handleAddExamWindow}
         onDeleteExamWindow={handleDeleteExamWindow}
         canManage={canManageEx}
+      />
+
+      {/* Timetable Editor Modal */}
+      <TimetableEditorModal
+        isOpen={isTimetableEditorOpen}
+        onClose={() => setIsTimetableEditorOpen(false)}
+        currentUser={currentUser}
+        onSlotSaved={() => {
+          setTimetableSlotsVersion((v) => v + 1);
+          setToasts((prev) => [
+            ...prev,
+            {
+              id: `slot-save-${Date.now()}`,
+              type: "success",
+              title: "Timetable Slot Configured",
+              message: "Weekly slot saved with exact duration and dependent topic dates recalculated.",
+            },
+          ]);
+        }}
+      />
+
+      {/* Lesson Plan & Topics Modal */}
+      <LessonPlanModal
+        isOpen={isLessonPlanOpen}
+        onClose={() => setIsLessonPlanOpen(false)}
+        subjectId={selectedSubjectId}
+        currentUser={currentUser}
+        onPlanUpdated={() => {
+          setTimetableSlotsVersion((v) => v + 1);
+          setToasts((prev) => [
+            ...prev,
+            {
+              id: `plan-upd-${Date.now()}`,
+              type: "success",
+              title: "Lesson Plan Updated",
+              message: "Topics and multi-exam mappings updated with chronological dates recalculated.",
+            },
+          ]);
+        }}
+      />
+
+      {/* Syllabus CSV Import Modal */}
+      <SyllabusCsvImportModal
+        isOpen={isSyllabusImportOpen}
+        onClose={() => setIsSyllabusImportOpen(false)}
+        subjectId={selectedSubjectId}
+        currentUser={currentUser}
+        onImportComplete={(report) => {
+          setTimetableSlotsVersion((v) => v + 1);
+          setToasts((prev) => [
+            ...prev,
+            {
+              id: `csv-imp-${Date.now()}`,
+              type: "success",
+              title: "Syllabus Imported",
+              message: `Imported ${report.importedCount} topics preserving original syllabus order.`,
+            },
+          ]);
+        }}
       />
 
       {/* Floating Toast Notification Stack */}

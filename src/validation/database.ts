@@ -68,23 +68,45 @@ export const TimetableSlotCreateSchema = z.object({
   day_of_week: z.number().int().min(1).max(6),
   start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Must be HH:MM or HH:MM:SS"),
   end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/, "Must be HH:MM or HH:MM:SS"),
-  room: z.string().optional(),
+  room: z.string().optional().nullable(),
+  effective_start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  effective_end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  is_override: z.boolean().default(false),
+  override_reason: z.string().optional().nullable(),
 }).refine((data) => data.start_time < data.end_time, {
   message: "Start time must be before end time",
   path: ["end_time"],
+}).refine((data) => {
+  if (data.effective_start_date && data.effective_end_date) {
+    return data.effective_start_date <= data.effective_end_date;
+  }
+  return true;
+}, {
+  message: "Effective start date must be on or before effective end date",
+  path: ["effective_end_date"],
 });
 
-// 5. Syllabus Topic Schema
+// 5. Syllabus Unit & Topic Schemas
+export const SyllabusUnitCreateSchema = z.object({
+  subject_id: uuidSchema(),
+  unit_number: z.number().int().positive(),
+  title: z.string().min(2),
+  description: z.string().optional().nullable(),
+  planned_hours: z.number().positive(),
+});
+
 export const SyllabusTopicCreateSchema = z.object({
   unit_id: uuidSchema(),
   subject_id: uuidSchema(),
   sequence_order: z.number().int().positive(),
   title: z.string().min(2),
-  description: z.string().optional(),
-  planned_hours: z.number().min(0.5).max(12.0),
+  description: z.string().optional().nullable(),
+  learning_objectives: z.string().optional().nullable(),
+  planned_hours: z.number().positive(),
   status: TopicProgressStatusEnum.default("NOT_STARTED"),
   percent_complete: z.number().min(0).max(100).default(0),
-  planned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  planned_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  exam_scopes: z.array(ExamTypeEnum).optional(),
 });
 
 // 6. Scheduled Occurrence Schema
@@ -134,6 +156,7 @@ export const SessionLogCreateSchema = z.object({
 
 export type SessionLogCreateInput = z.infer<typeof SessionLogCreateSchema>;
 export type TimetableSlotCreateInput = z.infer<typeof TimetableSlotCreateSchema>;
+export type SyllabusUnitCreateInput = z.infer<typeof SyllabusUnitCreateSchema>;
 export type SyllabusTopicCreateInput = z.infer<typeof SyllabusTopicCreateSchema>;
 export type SemesterCreateInput = z.infer<typeof SemesterCreateSchema>;
 

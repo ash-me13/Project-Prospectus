@@ -9,7 +9,7 @@ import {
   CalendarEventCreateSchema,
   CalendarEventCreateInput,
 } from "../../validation/database";
-import { DbCalendarEvent } from "../../types/database";
+import { DbCalendarEvent, DbSyllabusTopic, ExamTypeEnum } from "../../types/database";
 
 export interface RowValidationError {
   rowNumber: number; // 1-indexed line in file (accounting for header)
@@ -240,3 +240,213 @@ export function previewCalendarEventsImport(
     missingHeaders: [],
   };
 }
+
+export interface ParsedSyllabusRowData {
+  unit_number: number;
+  unit_title: string;
+  topic_sequence: number;
+  topic_title: string;
+  planned_hours: number;
+  description?: string;
+  learning_objectives?: string;
+  exam_scopes: ExamTypeEnum[];
+}
+
+/**
+ * Validates and previews a batch of Syllabus Units & Topics before committing.
+ * Preserves the original sequence order of the syllabus.
+ * Validates planned hours and multi-exam scope mappings.
+ */
+export function previewSyllabusImport(
+  csvContent: string,
+  subjectId: string,
+  existingTopics: DbSyllabusTopic[] = []
+): ImportPreviewResult<ParsedSyllabusRowData> {
+  const { headers, rows } = parseCsvText(csvContent);
+
+  const requiredHeaders = ["unit_number", "unit_title", "topic_sequence", "topic_title", "planned_hours"];
+  const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
+
+  if (missingHeaders.length > 0) {
+    return {
+      templateType: "syllabus_topics",
+      totalRows: rows.length,
+      validRowCount: 0,
+      invalidRowCount: rows.length,
+      duplicateRowCount: 0,
+      canCommit: false,
+      rows: [],
+      missingHeaders,
+    };
+  }
+
+  const validExamTypes = new Set<ExamTypeEnum>([
+    "SESSIONAL",
+    "MID_TERM",
+    "PUT",
+    "END_TERM",
+  ]);
+
+  const parsedRows: ParsedImportRow<ParsedSyllabusRowData>[] = [];
+  const seenSequences = new Set<number>();
+
+  rows.forEach((rawRow, idx) => {
+    const rowNumber = idx + 2;
+    const errors: RowValidationError[] = [];
+    const warnings: RowValidationWarning[] = [];
+
+    const unitNumber = parseInt(rawRow["unit_number"] || "0", 10);
+    const unitTitle = (rawRow["unit_title"] || "").trim();
+    const topicSequence = parseInt(rawRow["topic_sequence"] || "0", 10);
+    const topicTitle = (rawRow["topic_title"] || "").trim();
+    const plannedHours = parseFloat(rawRow["planned_hours"] || "0");
+    const description = (rawRow["description"] || "").trim() || undefined;
+    const learningObjectives = (rawRow["learning_objectives"] || "").trim() || undefined;
+
+    if (!unitNumber || unitNumber <= 0) {
+      errors.push({
+        rowNumber,
+        column: "unit_number",
+        value: rawRow["unit_number"],
+        message: "Unit number must be a positive integer.",
+      });
+    }
+
+    if (!unitTitle) {
+      errors.push({
+        rowNumber,
+        column: "unit_title",
+        value: "",
+        message: "Unit title is required.",
+      });
+    }
+
+    if (!topicSequence || topicSequence <= 0) {
+      errors.push({
+        rowNumber,
+        column: "topic_sequence",
+        value: rawRow["topic_sequence"],
+        message: "Topic sequence must be a positive integer.",
+      });
+    }
+
+    if (!topicTitle) {
+      errors.push({
+        rowNumber,
+        column: "topic_title",
+        value: "",
+        message: "Topic title is required.",
+      });
+    }
+
+    if (isNaN(plannedHours) || plannedHours <= 0) {
+      errors.push({
+        rowNumber,
+        column: "planned_hours",
+        value: rawRow["planned_hours"],
+        message: "Planned hours must be greater than zero.",
+      });
+    }
+
+    // Parse exam scopes
+    const rawExamScopes = rawRow["exam_scopes"] || "";
+    const examScopes: ExamTypeEnum[] = [];
+    if (rawExamScopes) {
+      const parts = rawExamScopes
+        .split(/[;,]/)
+        .map((p) => p.trim().toUpperCase())
+        .filter(Boolean);
+
+      parts.forEach((p) => {
+        const normalized = (p === "SESSIONAL_1" || p === "SESSIONAL_2" || p === "SESSIONAL1" || p === "SESSIONAL2") ? "SESSIONAL" : p;
+        if (validExamTypes.has(normalized as ExamTypeEnum)) {
+          if (!examScopes.includes(normalized as ExamTypeEnum)) {
+            examScopes.push(normalized as ExamTypeEnum);
+          }
+        } else {
+          warnings.push({
+            rowNumber,
+            column: "exam_scopes",
+            message: `Unknown exam scope "${p}" ignored. Valid types: SESSIONAL, MID_TERM, PUT, END_TERM.`,
+          });
+        }
+      });
+    }
+
+    // Duplicate detection
+    let isDuplicate = false;
+
+    // Intra-batch sequence collision
+    if (seenSequences.has(topicSequence)) {
+      isDuplicate = true;
+      errors.push({
+        rowNumber,
+        column: "topic_sequence",
+        value: String(topicSequence),
+        message: `Topic sequence ${topicSequence} is duplicated within the import file.`,
+      });
+    } else {
+      seenSequences.add(topicSequence);
+    }
+
+    // Existing topics duplicate check
+    const matchesExisting = existingTopics.some(
+      (t) =>
+        t.subject_id === subjectId &&
+        (t.sequence_order === topicSequence || t.title.toLowerCase() === topicTitle.toLowerCase())
+    );
+
+    if (matchesExisting) {
+      isDuplicate = true;
+      warnings.push({
+        rowNumber,
+        column: "topic_title",
+        message: `Topic with sequence ${topicSequence} or title "${topicTitle}" already exists for this subject.`,
+      });
+    }
+
+    const rowData: ParsedSyllabusRowData = {
+      unit_number: unitNumber,
+      unit_title: unitTitle,
+      topic_sequence: topicSequence,
+      topic_title: topicTitle,
+      planned_hours: plannedHours,
+      description,
+      learning_objectives: learningObjectives,
+      exam_scopes: examScopes,
+    };
+
+    parsedRows.push({
+      rowNumber,
+      raw: rawRow,
+      data: errors.length === 0 ? rowData : undefined,
+      isValid: errors.length === 0,
+      isDuplicate,
+      errors,
+      warnings,
+    });
+  });
+
+  // Sort parsedRows to strictly preserve topic_sequence order
+  parsedRows.sort((a, b) => {
+    const seqA = a.data?.topic_sequence ?? a.rowNumber;
+    const seqB = b.data?.topic_sequence ?? b.rowNumber;
+    return seqA - seqB;
+  });
+
+  const validRowCount = parsedRows.filter((r) => r.isValid && !r.isDuplicate).length;
+  const invalidRowCount = parsedRows.filter((r) => !r.isValid).length;
+  const duplicateRowCount = parsedRows.filter((r) => r.isDuplicate).length;
+
+  return {
+    templateType: "syllabus_topics",
+    totalRows: parsedRows.length,
+    validRowCount,
+    invalidRowCount,
+    duplicateRowCount,
+    canCommit: validRowCount > 0 && invalidRowCount === 0,
+    rows: parsedRows,
+    missingHeaders: [],
+  };
+}
+

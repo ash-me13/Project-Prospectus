@@ -6,12 +6,17 @@ import {
   DbBatch,
   DbSubject,
   DbSyllabusTopic,
+  DbSyllabusUnit,
+  DbTopicExamScope,
   DbScheduledSession,
   DbSessionLog,
   DbAuditLog,
   DbCalendarEvent,
   DbExamWindow,
   DbTimetableSlot,
+  DbBatchSubject,
+  DbFacultyAssignment,
+  ExamTypeEnum,
 } from "../../types/database";
 import {
   SessionLogCreateSchema,
@@ -22,6 +27,9 @@ import {
   CalendarEventCreateInput,
   ExamWindowCreateSchema,
   ExamWindowCreateInput,
+  TimetableSlotCreateSchema,
+  SyllabusUnitCreateSchema,
+  SyllabusTopicCreateSchema,
 } from "../../validation/database";
 import {
   AuthenticatedUser,
@@ -29,6 +37,8 @@ import {
   canManageSemester,
   canManageCalendar,
   canManageExams,
+  canManageTimetable,
+  canEditLessonPlan,
   assertAuthorized,
   AuthorizationError,
 } from "../../auth/authorization";
@@ -37,8 +47,14 @@ import {
   SessionShiftRecord,
 } from "../../domain/calendar-engine";
 import {
+  calculateSlotDurationHours,
+  validateTimetableSlotConflicts,
+  planSyllabusTopicDates,
+} from "../../domain/planning-engine";
+import {
   ParsedImportRow,
   ImportExecutionReport,
+  ParsedSyllabusRowData,
 } from "../import/csv-importer";
 
 export interface DatabaseConnectionStatus {
@@ -342,6 +358,90 @@ class IsolatedDataStore {
       end_time: "11:30:00",
       duration_hours: 1.5,
       room: "Lab 3",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+  ];
+
+  private batchSubjects: DbBatchSubject[] = [
+    {
+      id: "99999999-1111-1111-1111-111111111111",
+      batch_id: "22222222-2222-2222-2222-222222222221",
+      subject_id: "88888888-8888-8888-8888-888888888881",
+      target_finish_date: "2026-12-15",
+      is_active: true,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "99999999-1111-1111-1111-111111111112",
+      batch_id: "22222222-2222-2222-2222-222222222221",
+      subject_id: "88888888-8888-8888-8888-888888888882",
+      target_finish_date: "2026-12-15",
+      is_active: true,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+  ];
+
+  private facultyAssignments: DbFacultyAssignment[] = [
+    {
+      id: "e0000001-1111-1111-1111-111111111111",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      is_primary: true,
+      is_visiting: false,
+      assigned_at: "2026-08-01T00:00:00Z",
+    },
+  ];
+
+  private syllabusUnits: DbSyllabusUnit[] = [
+    {
+      id: "a0000001-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888881",
+      unit_number: 1,
+      title: "Algorithmic Foundations & Linear Data Structures",
+      description: "Core asymptotic bounds, dynamic arrays, linked structures",
+      planned_hours: 12.0,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "a0000001-1111-1111-1111-111111111112",
+      subject_id: "88888888-8888-8888-8888-888888888881",
+      unit_number: 2,
+      title: "Trees, Heaps & Balanced Search Trees",
+      description: "BST, AVL, Red-Black Trees, Priority Queues",
+      planned_hours: 14.0,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+  ];
+
+  private topicExamScopes: DbTopicExamScope[] = [
+    {
+      id: "scope-1",
+      topic_id: "b0000001-1111-1111-1111-111111111101",
+      exam_type: "SESSIONAL",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "scope-2",
+      topic_id: "b0000001-1111-1111-1111-111111111101",
+      exam_type: "MID_TERM",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "scope-3",
+      topic_id: "b0000001-1111-1111-1111-111111111102",
+      exam_type: "SESSIONAL",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "scope-4",
+      topic_id: "b0000001-1111-1111-1111-111111111102",
+      exam_type: "MID_TERM",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "scope-5",
+      topic_id: "b0000001-1111-1111-1111-111111111103",
+      exam_type: "MID_TERM",
       created_at: "2026-08-01T00:00:00Z",
     },
   ];
@@ -1084,6 +1184,530 @@ class IsolatedDataStore {
       skippedDuplicatesCount: duplicatesCount,
       recalculatedSessionsCount: recalculatedCount,
       details,
+    };
+  }
+
+  // ============================================================================
+  // TIMETABLE & FACULTY ASSIGNMENTS
+  // ============================================================================
+
+  public getBatchSubjects(): DbBatchSubject[] {
+    return this.batchSubjects;
+  }
+
+  public getFacultyAssignments(): DbFacultyAssignment[] {
+    return this.facultyAssignments;
+  }
+
+  public getTimetableSlots(batchSubjectId?: string, facultyId?: string): DbTimetableSlot[] {
+    let result = [...this.timetableSlots];
+    if (batchSubjectId) {
+      result = result.filter((s) => s.batch_subject_id === batchSubjectId);
+    }
+    if (facultyId) {
+      result = result.filter((s) => s.faculty_id === facultyId);
+    }
+    return result;
+  }
+
+  public createTimetableSlot(rawInput: unknown, user: AuthenticatedUser): DbTimetableSlot {
+    const parsed = TimetableSlotCreateSchema.parse(rawInput);
+
+    // 1. Authorization check
+    const batchSubject = this.batchSubjects.find((bs) => bs.id === parsed.batch_subject_id);
+    if (!batchSubject) {
+      throw new Error(`Batch subject ID ${parsed.batch_subject_id} not found.`);
+    }
+
+    const batch = this.batches.find((b) => b.id === batchSubject.batch_id);
+    assertAuthorized(
+      canManageTimetable(user, batch?.campus_id),
+      "Unauthorized: Only authorized Campus Managers or Admins can configure timetable slots."
+    );
+
+    // 2. Conflict validation with batch mapping
+    const batchMap = new Map<string, string>();
+    this.batchSubjects.forEach((bs) => batchMap.set(bs.id, bs.batch_id));
+
+    const validation = validateTimetableSlotConflicts(parsed, this.timetableSlots, batchMap);
+    if (!validation.isValid) {
+      throw new Error(
+        `Timetable conflict detected: ${validation.conflicts.map((c) => c.message).join(" | ")}`
+      );
+    }
+
+    // 3. Derive exact teaching hours from slot duration (50 min = 0.8333 hrs, never 1 hr)
+    const durationHours = calculateSlotDurationHours(parsed.start_time, parsed.end_time);
+
+    const newSlot: DbTimetableSlot = {
+      id: `c0000001-${Date.now().toString(16).padStart(4, "0").slice(-4)}-1111-1111-111111111111`,
+      batch_subject_id: parsed.batch_subject_id,
+      faculty_id: parsed.faculty_id,
+      day_of_week: parsed.day_of_week,
+      start_time: parsed.start_time,
+      end_time: parsed.end_time,
+      duration_hours: durationHours,
+      room: parsed.room || null,
+      effective_start_date: parsed.effective_start_date || null,
+      effective_end_date: parsed.effective_end_date || null,
+      is_override: validation.hasOverride,
+      override_reason: validation.hasOverride ? parsed.override_reason || null : null,
+      created_at: new Date().toISOString(),
+    };
+
+    this.timetableSlots.push(newSlot);
+
+    // 4. Audit Log
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "timetable_slots",
+      record_id: newSlot.id,
+      action: "INSERT",
+      changed_by: user.id,
+      new_values: {
+        ...newSlot,
+        hasOverride: validation.hasOverride,
+        override_reason: newSlot.override_reason,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    // 5. Trigger topic date recalculation for the subject
+    this.recalculateSubjectPlanning(batchSubject.subject_id, batchSubject.id);
+
+    return newSlot;
+  }
+
+  public deleteTimetableSlot(
+    slotId: string,
+    user: AuthenticatedUser,
+    reason: string = "Timetable slot deleted"
+  ): { success: boolean; slotId: string } {
+    const slotIndex = this.timetableSlots.findIndex((s) => s.id === slotId);
+    if (slotIndex < 0) {
+      throw new Error(`Timetable slot ${slotId} not found.`);
+    }
+
+    const slot = this.timetableSlots[slotIndex];
+    const batchSubject = this.batchSubjects.find((bs) => bs.id === slot.batch_subject_id);
+    const batch = batchSubject ? this.batches.find((b) => b.id === batchSubject.batch_id) : undefined;
+
+    assertAuthorized(
+      canManageTimetable(user, batch?.campus_id),
+      "Unauthorized: Only authorized Campus Managers or Admins can delete timetable slots."
+    );
+
+    this.timetableSlots.splice(slotIndex, 1);
+
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "timetable_slots",
+      record_id: slotId,
+      action: "DELETE",
+      changed_by: user.id,
+      old_values: { ...slot },
+      new_values: { reason },
+      timestamp: new Date().toISOString(),
+    });
+
+    if (batchSubject) {
+      this.recalculateSubjectPlanning(batchSubject.subject_id, batchSubject.id);
+    }
+
+    return { success: true, slotId };
+  }
+
+  // ============================================================================
+  // SYLLABUS, LESSON PLANS & TOPIC-TO-EXAM MAPPING
+  // ============================================================================
+
+  public getSyllabusUnits(subjectId: string): DbSyllabusUnit[] {
+    return this.syllabusUnits
+      .filter((u) => u.subject_id === subjectId)
+      .sort((a, b) => a.unit_number - b.unit_number);
+  }
+
+  public createSyllabusUnit(rawInput: unknown, user: AuthenticatedUser): DbSyllabusUnit {
+    const parsed = SyllabusUnitCreateSchema.parse(rawInput);
+
+    const assignments = this.facultyAssignments.filter((fa) => {
+      const bs = this.batchSubjects.find((b) => b.id === fa.batch_subject_id);
+      return bs?.subject_id === parsed.subject_id;
+    });
+    const primaryFacultyId = assignments.find((a) => a.is_primary)?.faculty_id || assignments[0]?.faculty_id || "";
+
+    assertAuthorized(
+      canEditLessonPlan(user, primaryFacultyId),
+      "Unauthorized: Only assigned faculty or academic admin can create syllabus units."
+    );
+
+    const duplicate = this.syllabusUnits.find(
+      (u) => u.subject_id === parsed.subject_id && u.unit_number === parsed.unit_number
+    );
+    if (duplicate) {
+      throw new Error(`Unit number ${parsed.unit_number} already exists for this subject.`);
+    }
+
+    const newUnit: DbSyllabusUnit = {
+      id: `a0000001-${Date.now().toString(16).padStart(4, "0").slice(-4)}-1111-1111-111111111111`,
+      subject_id: parsed.subject_id,
+      unit_number: parsed.unit_number,
+      title: parsed.title,
+      description: parsed.description || null,
+      planned_hours: parsed.planned_hours,
+      created_at: new Date().toISOString(),
+    };
+
+    this.syllabusUnits.push(newUnit);
+
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "syllabus_units",
+      record_id: newUnit.id,
+      action: "INSERT",
+      changed_by: user.id,
+      new_values: { ...newUnit },
+      timestamp: new Date().toISOString(),
+    });
+
+    return newUnit;
+  }
+
+  public getTopicsWithExamScopes(
+    subjectId: string
+  ): Array<DbSyllabusTopic & { examScopes: ExamTypeEnum[] }> {
+    const topics = this.topics
+      .filter((t) => t.subject_id === subjectId)
+      .sort((a, b) => a.sequence_order - b.sequence_order);
+
+    return topics.map((t) => {
+      const scopes = this.topicExamScopes
+        .filter((tes) => tes.topic_id === t.id)
+        .map((tes) => tes.exam_type);
+      return {
+        ...t,
+        examScopes: scopes,
+      };
+    });
+  }
+
+  public createSyllabusTopic(rawInput: unknown, user: AuthenticatedUser): DbSyllabusTopic {
+    const parsed = SyllabusTopicCreateSchema.parse(rawInput);
+
+    const assignments = this.facultyAssignments.filter((fa) => {
+      const bs = this.batchSubjects.find((b) => b.id === fa.batch_subject_id);
+      return bs?.subject_id === parsed.subject_id;
+    });
+    const primaryFacultyId = assignments.find((a) => a.is_primary)?.faculty_id || assignments[0]?.faculty_id || "";
+
+    assertAuthorized(
+      canEditLessonPlan(user, primaryFacultyId),
+      "Unauthorized: Only assigned faculty or academic admin can manage lesson plans."
+    );
+
+    const duplicate = this.topics.find(
+      (t) => t.subject_id === parsed.subject_id && t.sequence_order === parsed.sequence_order
+    );
+    if (duplicate) {
+      throw new Error(`Topic sequence order ${parsed.sequence_order} already exists for this subject.`);
+    }
+
+    const newTopic: DbSyllabusTopic = {
+      id: `b0000001-${Date.now().toString(16).padStart(4, "0").slice(-4)}-1111-1111-111111111111`,
+      unit_id: parsed.unit_id,
+      subject_id: parsed.subject_id,
+      sequence_order: parsed.sequence_order,
+      title: parsed.title,
+      description: parsed.description || null,
+      learning_objectives: parsed.learning_objectives || null,
+      planned_hours: parsed.planned_hours,
+      status: parsed.status,
+      percent_complete: parsed.percent_complete,
+      planned_date: parsed.planned_date || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    this.topics.push(newTopic);
+
+    // Save exam scopes
+    if (parsed.exam_scopes && parsed.exam_scopes.length > 0) {
+      parsed.exam_scopes.forEach((scope) => {
+        this.topicExamScopes.push({
+          id: `scope-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          topic_id: newTopic.id,
+          exam_type: scope,
+          created_at: new Date().toISOString(),
+        });
+      });
+    }
+
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "syllabus_topics",
+      record_id: newTopic.id,
+      action: "INSERT",
+      changed_by: user.id,
+      new_values: { ...newTopic },
+      timestamp: new Date().toISOString(),
+    });
+
+    this.recalculateSubjectPlanning(parsed.subject_id);
+
+    return newTopic;
+  }
+
+  public getTopicExamScopes(topicId?: string): DbTopicExamScope[] {
+    if (topicId) {
+      return this.topicExamScopes.filter((s) => s.topic_id === topicId);
+    }
+    return this.topicExamScopes;
+  }
+
+  public setTopicExamScopes(
+    topicId: string,
+    examTypes: ExamTypeEnum[],
+    user: AuthenticatedUser
+  ): DbTopicExamScope[] {
+    const topic = this.topics.find((t) => t.id === topicId);
+    if (!topic) throw new Error(`Topic ${topicId} not found.`);
+
+    const assignments = this.facultyAssignments.filter((fa) => {
+      const bs = this.batchSubjects.find((b) => b.id === fa.batch_subject_id);
+      return bs?.subject_id === topic.subject_id;
+    });
+    const primaryFacultyId = assignments.find((a) => a.is_primary)?.faculty_id || assignments[0]?.faculty_id || "";
+
+    assertAuthorized(
+      canEditLessonPlan(user, primaryFacultyId),
+      "Unauthorized: Only assigned faculty or academic admin can update topic exam mappings."
+    );
+
+    // Clear existing scopes for this topic
+    this.topicExamScopes = this.topicExamScopes.filter((s) => s.topic_id !== topicId);
+
+    const newScopes: DbTopicExamScope[] = [];
+    for (const examType of examTypes) {
+      const scope: DbTopicExamScope = {
+        id: `scope-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        topic_id: topicId,
+        exam_type: examType,
+        created_at: new Date().toISOString(),
+      };
+      this.topicExamScopes.push(scope);
+      newScopes.push(scope);
+    }
+
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "topic_exam_scopes",
+      record_id: topicId,
+      action: "UPDATE",
+      changed_by: user.id,
+      new_values: { examTypes },
+      timestamp: new Date().toISOString(),
+    });
+
+    return newScopes;
+  }
+
+  /**
+   * Batch imports a structured syllabus lesson plan, preserving original sequence order.
+   * Auto-creates or attaches units, creates topics, and links multi-exam mappings.
+   * Immediately recalculates topic planned dates with the planning engine.
+   */
+  public importSyllabusBatch(
+    subjectId: string,
+    rows: ParsedSyllabusRowData[],
+    user: AuthenticatedUser
+  ): ImportExecutionReport {
+    const assignments = this.facultyAssignments.filter((fa) => {
+      const bs = this.batchSubjects.find((b) => b.id === fa.batch_subject_id);
+      return bs?.subject_id === subjectId;
+    });
+    const primaryFacultyId = assignments.find((a) => a.is_primary)?.faculty_id || assignments[0]?.faculty_id || "";
+
+    assertAuthorized(
+      canEditLessonPlan(user, primaryFacultyId),
+      "Unauthorized: Only assigned faculty or academic admin can import syllabus lesson plans."
+    );
+
+    const details: string[] = [];
+    let importedTopicsCount = 0;
+
+    // Sort rows by topic sequence to strictly preserve original syllabus order
+    const sortedRows = [...rows].sort((a, b) => a.topic_sequence - b.topic_sequence);
+
+    for (const row of sortedRows) {
+      // 1. Find or create Unit
+      let unit = this.syllabusUnits.find(
+        (u) => u.subject_id === subjectId && u.unit_number === row.unit_number
+      );
+
+      if (!unit) {
+        unit = {
+          id: `a0000001-${Date.now().toString(16).padStart(4, "0").slice(-4)}-${row.unit_number.toString().padStart(4, "0")}-111111111111`,
+          subject_id: subjectId,
+          unit_number: row.unit_number,
+          title: row.unit_title,
+          description: null,
+          planned_hours: row.planned_hours,
+          created_at: new Date().toISOString(),
+        };
+        this.syllabusUnits.push(unit);
+      }
+
+      // 2. Find or create Topic
+      let topic = this.topics.find(
+        (t) => t.subject_id === subjectId && t.sequence_order === row.topic_sequence
+      );
+
+      if (topic) {
+        topic.title = row.topic_title;
+        topic.planned_hours = row.planned_hours;
+        topic.description = row.description || null;
+        topic.learning_objectives = row.learning_objectives || null;
+        topic.unit_id = unit.id;
+        topic.updated_at = new Date().toISOString();
+      } else {
+        topic = {
+          id: `b0000001-${Date.now().toString(16).padStart(4, "0").slice(-4)}-${row.topic_sequence.toString().padStart(4, "0")}-111111111111`,
+          unit_id: unit.id,
+          subject_id: subjectId,
+          sequence_order: row.topic_sequence,
+          title: row.topic_title,
+          description: row.description || null,
+          learning_objectives: row.learning_objectives || null,
+          planned_hours: row.planned_hours,
+          status: "NOT_STARTED",
+          percent_complete: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.topics.push(topic);
+      }
+
+      importedTopicsCount++;
+
+      // 3. Update exam scopes
+      this.topicExamScopes = this.topicExamScopes.filter((s) => s.topic_id !== topic!.id);
+      for (const examScope of row.exam_scopes) {
+        this.topicExamScopes.push({
+          id: `scope-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          topic_id: topic.id,
+          exam_type: examScope,
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      details.push(
+        `Imported topic #${row.topic_sequence}: "${row.topic_title}" (${row.planned_hours} hrs, Unit ${row.unit_number})`
+      );
+    }
+
+    // 4. Trigger planning calculation
+    const planning = this.recalculateSubjectPlanning(subjectId);
+
+    // 5. Audit Log
+    this.auditLogs.push({
+      id: `audit-${Date.now()}`,
+      table_name: "syllabus_topics",
+      record_id: `batch-syllabus-${subjectId}`,
+      action: "INSERT",
+      changed_by: user.id,
+      new_values: {
+        subjectId,
+        importedTopicsCount,
+        recalculatedTopicsCount: planning.updatedTopicsCount,
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      success: true,
+      importedCount: importedTopicsCount,
+      failedCount: 0,
+      skippedDuplicatesCount: 0,
+      recalculatedSessionsCount: planning.updatedTopicsCount,
+      details,
+    };
+  }
+
+  /**
+   * Automatically derives planned dates for all topics of a subject based on
+   * weekly timetable slots, calendar events, holidays, and 2nd/4th Saturday rules.
+   */
+  public recalculateSubjectPlanning(
+    subjectId: string,
+    batchSubjectId?: string
+  ): {
+    updatedTopicsCount: number;
+    occurrencesCount: number;
+    topicPlannedDates: Map<string, string | null>;
+  } {
+    // 1. Locate batch subject
+    let bs = batchSubjectId ? this.batchSubjects.find((b) => b.id === batchSubjectId) : undefined;
+    if (!bs) {
+      bs = this.batchSubjects.find((b) => b.subject_id === subjectId);
+    }
+
+    if (!bs) {
+      return { updatedTopicsCount: 0, occurrencesCount: 0, topicPlannedDates: new Map() };
+    }
+
+    // 2. Locate batch and semester
+    const batch = this.batches.find((b) => b.id === bs!.batch_id);
+    const semester = batch ? this.semesters.find((s) => s.id === batch.semester_id) : undefined;
+
+    if (!semester) {
+      return { updatedTopicsCount: 0, occurrencesCount: 0, topicPlannedDates: new Map() };
+    }
+
+    // 3. Gather semester calendar events
+    const events = this.calendarEvents.filter(
+      (e) => e.semester_id === semester.id || (!e.campus_id || e.campus_id === semester.campus_id)
+    );
+
+    // 4. Gather active timetable slots for this batch_subject
+    const slots = this.timetableSlots.filter((s) => s.batch_subject_id === bs!.id);
+
+    // 5. Gather topics and exam scopes
+    const subjectTopics = this.topics
+      .filter((t) => t.subject_id === subjectId)
+      .sort((a, b) => a.sequence_order - b.sequence_order);
+
+    const topicIds = new Set(subjectTopics.map((t) => t.id));
+    const scopes = this.topicExamScopes.filter((s) => topicIds.has(s.topic_id));
+
+    // 6. Run Planning Engine
+    const planResult = planSyllabusTopicDates(
+      {
+        startDate: semester.start_date,
+        endDate: semester.end_date,
+        saturdayRule: semester.saturday_rule,
+      },
+      slots,
+      subjectTopics,
+      events,
+      scopes
+    );
+
+    // 7. Update topic planned dates in memory
+    for (const [topicId, plannedDate] of planResult.topicPlannedDates) {
+      const topicIndex = this.topics.findIndex((t) => t.id === topicId);
+      if (topicIndex >= 0) {
+        this.topics[topicIndex] = {
+          ...this.topics[topicIndex],
+          planned_date: plannedDate,
+          updated_at: new Date().toISOString(),
+        };
+      }
+    }
+
+    return {
+      updatedTopicsCount: planResult.schedules.length,
+      occurrencesCount: planResult.occurrences.length,
+      topicPlannedDates: planResult.topicPlannedDates,
     };
   }
 }

@@ -108,6 +108,21 @@ export function canManageExams(
 }
 
 /**
+ * Checks if a user can manage weekly timetable slots for a campus.
+ */
+export function canManageTimetable(
+  user: AuthenticatedUser,
+  targetCampusId?: string | null
+): boolean {
+  if (user.role === "admin") return true;
+  if (user.role === "campus_manager") {
+    if (!targetCampusId) return true;
+    return user.campusId === targetCampusId;
+  }
+  return false;
+}
+
+/**
  * Server-side authorization guard assertion.
  */
 export function assertAuthorized(

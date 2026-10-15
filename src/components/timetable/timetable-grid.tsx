@@ -1,5 +1,5 @@
 import React from "react";
-import { Clock, User } from "lucide-react";
+import { Clock, User, Plus, Trash2 } from "lucide-react";
 
 export interface TimetableSlotView {
   id: string;
@@ -15,11 +15,17 @@ export interface TimetableSlotView {
 export interface TimetableGridProps {
   slots: TimetableSlotView[];
   saturdayRuleLabel?: string;
+  canEdit?: boolean;
+  onAddSlot?: () => void;
+  onDeleteSlot?: (slotId: string) => void;
 }
 
 export function TimetableGrid({
   slots,
   saturdayRuleLabel = "2nd & 4th Working",
+  canEdit = false,
+  onAddSlot,
+  onDeleteSlot,
 }: TimetableGridProps) {
   const days = [
     { day: 1, label: "Monday", type: "instructional" },
@@ -41,15 +47,27 @@ export function TimetableGrid({
             Automated calendar allocation with working day enforcement
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="flex items-center gap-1.5 text-[#172033]">
-            <span className="h-2 w-2 rounded-full bg-[#16836B]" />
-            Instructional
-          </span>
-          <span className="flex items-center gap-1.5 text-[#64748B]">
-            <span className="h-2 w-2 rounded-full bg-[#8878F5]" />
-            {saturdayRuleLabel}
-          </span>
+        <div className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[#172033]">
+              <span className="h-2 w-2 rounded-full bg-[#16836B]" />
+              Instructional
+            </span>
+            <span className="flex items-center gap-1.5 text-[#64748B]">
+              <span className="h-2 w-2 rounded-full bg-[#8878F5]" />
+              {saturdayRuleLabel}
+            </span>
+          </div>
+
+          {canEdit && onAddSlot && (
+            <button
+              onClick={onAddSlot}
+              className="px-2.5 py-1 text-xs font-semibold text-white bg-[#4965E8] hover:bg-[#4965E8]/90 rounded-md transition-colors flex items-center gap-1 shadow-2xs"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Slot
+            </button>
+          )}
         </div>
       </div>
 
@@ -96,10 +114,22 @@ export function TimetableGrid({
                           <Clock className="h-3 w-3 text-[#64748B]" />
                           {slot.startTime}–{slot.endTime}
                         </span>
-                        <span className="flex items-center gap-1 truncate max-w-[70px]">
-                          <User className="h-3 w-3 text-[#64748B]" />
-                          {slot.facultyName.split(" ").slice(-1)[0]}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="flex items-center gap-1 truncate max-w-[70px]">
+                            <User className="h-3 w-3 text-[#64748B]" />
+                            {slot.facultyName.split(" ").slice(-1)[0]}
+                          </span>
+                          {canEdit && onDeleteSlot && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteSlot(slot.id)}
+                              className="text-[#64748B] hover:text-[#C84B58] p-0.5 rounded transition-colors"
+                              title="Delete timetable slot"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))

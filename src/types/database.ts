@@ -166,6 +166,10 @@ export interface DbTimetableSlot {
   end_time: string;
   duration_hours: number;
   room?: string | null;
+  effective_start_date?: string | null;
+  effective_end_date?: string | null;
+  is_override?: boolean;
+  override_reason?: string | null;
   created_at: string;
 }
 
@@ -188,6 +192,7 @@ export interface DbSyllabusTopic {
   sequence_order: number;
   title: string;
   description?: string | null;
+  learning_objectives?: string | null;
   planned_hours: number;
   status: TopicProgressStatus;
   percent_complete: number;
