@@ -176,13 +176,46 @@ class IsolatedDataStore {
   private batches: DbBatch[] = [
     {
       id: "77777777-7777-7777-7777-777777777771",
-      campus_id: "11111111-1111-1111-1111-111111111111",
-      track_id: "aaaaaaaa-1111-1111-1111-111111111111",
+      campus_id: "11111111-1111-1111-1111-111111111111", // HITECH
+      track_id: "aaaaaaaa-1111-1111-1111-111111111111", // Mirai
       semester_id: "55555555-5555-5555-5555-555555555555",
       name: "CSE 2026 Sec B",
       section: "B",
       intake_year: 2026,
       student_count: 64,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "77777777-7777-7777-7777-777777777772",
+      campus_id: "11111111-1111-1111-1111-111111111111", // HITECH
+      track_id: "aaaaaaaa-2222-2222-2222-222222222222", // University Track
+      semester_id: "55555555-5555-5555-5555-555555555555",
+      name: "CSE 2026 Sec A",
+      section: "A",
+      intake_year: 2026,
+      student_count: 60,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "77777777-7777-7777-7777-777777777773",
+      campus_id: "22222222-2222-2222-2222-222222222222", // RATNAM
+      track_id: "aaaaaaaa-2222-2222-2222-222222222222", // University Track
+      semester_id: "55555555-5555-5555-5555-555555555555",
+      name: "ECE 2026 Sec R",
+      section: "R",
+      intake_year: 2026,
+      student_count: 58,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "77777777-7777-7777-7777-777777777774",
+      campus_id: "33333333-3333-3333-3333-333333333333", // RGIB
+      track_id: "aaaaaaaa-1111-1111-1111-111111111111", // Mirai Track
+      semester_id: "55555555-5555-5555-5555-555555555555",
+      name: "AIML 2026 Sec G",
+      section: "G",
+      intake_year: 2026,
+      student_count: 62,
       created_at: "2026-08-01T00:00:00Z",
     },
   ];
@@ -205,6 +238,16 @@ class IsolatedDataStore {
       department: "CSE",
       credit_hours: 4,
       total_planned_hours: 42.0,
+      syllabus_version: "v1.0",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "88888888-8888-8888-8888-888888888883",
+      code: "CS301",
+      name: "Computer Networks",
+      department: "CSE",
+      credit_hours: 4,
+      total_planned_hours: 40.0,
       syllabus_version: "v1.0",
       created_at: "2026-08-01T00:00:00Z",
     },
@@ -275,6 +318,88 @@ class IsolatedDataStore {
       status: "NOT_STARTED",
       percent_complete: 0,
       planned_date: "2026-10-19",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
+    },
+    // CS202: Operating Systems (Tight Status)
+    {
+      id: "b0000002-1111-1111-1111-111111111101",
+      unit_id: "a0000002-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888882",
+      sequence_order: 1,
+      title: "OS Structures & Process Architecture",
+      planned_hours: 3.0,
+      status: "COMPLETED",
+      percent_complete: 100,
+      planned_date: "2026-08-10",
+      actual_completed_date: "2026-08-10",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-10T11:30:00Z",
+    },
+    {
+      id: "b0000002-1111-1111-1111-111111111102",
+      unit_id: "a0000002-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888882",
+      sequence_order: 2,
+      title: "Thread Concurrency & Critical Section Problem",
+      planned_hours: 3.0,
+      status: "IN_PROGRESS",
+      percent_complete: 50,
+      planned_date: "2026-10-08", // Overdue topic
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-10-08T11:30:00Z",
+    },
+    {
+      id: "b0000002-1111-1111-1111-111111111103",
+      unit_id: "a0000002-1111-1111-1111-111111111112",
+      subject_id: "88888888-8888-8888-8888-888888888882",
+      sequence_order: 3,
+      title: "Deadlock Avoidance & Banker's Algorithm",
+      planned_hours: 4.0,
+      status: "NOT_STARTED",
+      percent_complete: 0,
+      planned_date: "2026-10-22",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
+    },
+    // CS301: Computer Networks (Danger Status)
+    {
+      id: "b0000003-1111-1111-1111-111111111101",
+      unit_id: "a0000003-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888883",
+      sequence_order: 1,
+      title: "Layered Network Architectures & Physical Layer",
+      planned_hours: 2.0,
+      status: "COMPLETED",
+      percent_complete: 100,
+      planned_date: "2026-08-12",
+      actual_completed_date: "2026-08-12",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-12T11:30:00Z",
+    },
+    {
+      id: "b0000003-1111-1111-1111-111111111102",
+      unit_id: "a0000003-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888883",
+      sequence_order: 2,
+      title: "Data Link Layer Framing & Error Detection",
+      planned_hours: 2.0,
+      status: "IN_PROGRESS",
+      percent_complete: 20,
+      planned_date: "2026-10-05", // Overdue topic
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-10-05T11:30:00Z",
+    },
+    {
+      id: "b0000003-1111-1111-1111-111111111103",
+      unit_id: "a0000003-1111-1111-1111-111111111112",
+      subject_id: "88888888-8888-8888-8888-888888888883",
+      sequence_order: 3,
+      title: "IP Addressing, Subnetting & CIDR",
+      planned_hours: 6.0,
+      status: "NOT_STARTED",
+      percent_complete: 0,
+      planned_date: "2026-10-24",
       created_at: "2026-08-01T00:00:00Z",
       updated_at: "2026-08-01T00:00:00Z",
     },
@@ -349,6 +474,42 @@ class IsolatedDataStore {
       session_date: "2026-10-16",
       start_time: "14:00:00",
       end_time: "15:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111107",
+      batch_subject_id: "99999999-1111-1111-1111-111111111113",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111112",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-20",
+      start_time: "10:00:00",
+      end_time: "11:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111108",
+      batch_subject_id: "99999999-1111-1111-1111-111111111114",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111111",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-21",
+      start_time: "10:00:00",
+      end_time: "11:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111109",
+      batch_subject_id: "99999999-1111-1111-1111-111111111115",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111113",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-22",
+      start_time: "10:00:00",
+      end_time: "11:30:00",
       duration_hours: 1.5,
       occurrence_status: "SCHEDULED",
       created_at: "2026-08-01T00:00:00Z",
@@ -431,16 +592,40 @@ class IsolatedDataStore {
   private batchSubjects: DbBatchSubject[] = [
     {
       id: "99999999-1111-1111-1111-111111111111",
-      batch_id: "22222222-2222-2222-2222-222222222221",
-      subject_id: "88888888-8888-8888-8888-888888888881",
+      batch_id: "77777777-7777-7777-7777-777777777771", // HITECH Sec B (Mirai)
+      subject_id: "88888888-8888-8888-8888-888888888881", // CS201 DSA (On Track)
       target_finish_date: "2026-12-15",
       is_active: true,
       created_at: "2026-08-01T00:00:00Z",
     },
     {
       id: "99999999-1111-1111-1111-111111111112",
-      batch_id: "22222222-2222-2222-2222-222222222221",
-      subject_id: "88888888-8888-8888-8888-888888888882",
+      batch_id: "77777777-7777-7777-7777-777777777771", // HITECH Sec B (Mirai)
+      subject_id: "88888888-8888-8888-8888-888888888882", // CS202 OS (Tight)
+      target_finish_date: "2026-12-15",
+      is_active: true,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "99999999-1111-1111-1111-111111111113",
+      batch_id: "77777777-7777-7777-7777-777777777772", // HITECH Sec A (Univ)
+      subject_id: "88888888-8888-8888-8888-888888888883", // CS301 CN (Danger)
+      target_finish_date: "2026-12-15",
+      is_active: true,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "99999999-1111-1111-1111-111111111114",
+      batch_id: "77777777-7777-7777-7777-777777777773", // RATNAM Sec R (Univ)
+      subject_id: "88888888-8888-8888-8888-888888888882", // CS202 OS (Tight)
+      target_finish_date: "2026-12-15",
+      is_active: true,
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "99999999-1111-1111-1111-111111111115",
+      batch_id: "77777777-7777-7777-7777-777777777774", // RGIB Sec G (Mirai)
+      subject_id: "88888888-8888-8888-8888-888888888881", // CS201 DSA (On Track)
       target_finish_date: "2026-12-15",
       is_active: true,
       created_at: "2026-08-01T00:00:00Z",
@@ -1777,11 +1962,18 @@ class IsolatedDataStore {
     return newTopic;
   }
 
-  public getTopicExamScopes(topicId?: string): DbTopicExamScope[] {
-    if (topicId) {
-      return this.topicExamScopes.filter((s) => s.topic_id === topicId);
+  public getTopicExamScopes(subjectIdOrTopicId?: string): DbTopicExamScope[] {
+    if (!subjectIdOrTopicId) {
+      return this.topicExamScopes;
     }
-    return this.topicExamScopes;
+    // Check if ID matches a subject
+    const subjectTopics = this.topics.filter((t) => t.subject_id === subjectIdOrTopicId);
+    if (subjectTopics.length > 0) {
+      const topicIds = new Set(subjectTopics.map((t) => t.id));
+      return this.topicExamScopes.filter((s) => topicIds.has(s.topic_id));
+    }
+    // Otherwise filter by topic_id
+    return this.topicExamScopes.filter((s) => s.topic_id === subjectIdOrTopicId);
   }
 
   public setTopicExamScopes(

@@ -1,16 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
-  calculateCourseProgression,
   calculateExamReadiness,
-  rollUpTrackProgress,
+  calculateSubjectProgressionServer,
 } from "@/domain/calculation-engine";
-import {
-  SEED_SUBJECTS,
-  SEED_TOPICS_CS201,
-  SEED_EXAMS,
-} from "@/lib/mock-data";
+import { AcademicAnalyticsService } from "@/domain/analytics-service";
+import { AdminExecutiveDashboard } from "@/components/analytics/admin-executive-dashboard";
+import { CampusManagerDashboard } from "@/components/analytics/campus-manager-dashboard";
+import { FacultyAnalyticsDashboard } from "@/components/analytics/faculty-analytics-dashboard";
+import { SubjectDetailView } from "@/components/analytics/subject-detail-view";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopToolbar } from "@/components/layout/top-toolbar";
 import { PageHeader } from "@/components/ui/page-header";
@@ -31,7 +30,7 @@ import {
   canManageExams,
   AuthenticatedUser,
 } from "@/auth/authorization";
-import { UserRole } from "@/types/academic";
+import { UserRole, ExamType } from "@/types/academic";
 import {
   DbSemester,
   DbCalendarEvent,
@@ -390,28 +389,188 @@ export default function ProspectusApp() {
     return report;
   };
 
-  // Mock sessions state (starts with seed and updates on rapid log)
-  const [topics, setTopics] = useState(SEED_TOPICS_CS201);
-  const [loggedSessionsCount, setLoggedSessionsCount] = useState<number>(3);
-
-  // Run the Academic Calculation Engine dynamically
-  // Target deadline Dec 5, 2026; available teaching hours on calendar: 24.5 hrs
-  const availableHours = 24.5;
-  const progressionMetrics = calculateCourseProgression(
-    topics,
-    availableHours,
-    "2026-10-16"
+  // Authoritative Analytics Service Instance
+  const analyticsService = useMemo(
+    () => new AcademicAnalyticsService(isolatedDataStore),
+    []
   );
 
-  const midTermExam = SEED_EXAMS.find((e) => e.examType === "MID_TERM")!;
-  const examReadiness = calculateExamReadiness(
-    "MID_TERM",
-    midTermExam.name,
-    midTermExam.startDate,
-    topics
+  // Subject Drilldown State
+  const [inspectedSubjectId, setInspectedSubjectId] = useState<string | null>(null);
+  const [inspectedBatchId, setInspectedBatchId] = useState<string | null>(null);
+
+  // Analytics Filters State
+  const [adminFilters, setAdminFilters] = useState<{
+    campusId: string;
+    trackId: string;
+    status: string;
+  }>({
+    campusId: "ALL",
+    trackId: "ALL",
+    status: "ALL",
+  });
+  const [cmStatusFilter, setCmStatusFilter] = useState<string>("ALL");
+
+  // Campus resolution
+  const campusIdMap: Record<string, string> = {
+    HITECH: "11111111-1111-1111-1111-111111111111",
+    RATNAM: "22222222-2222-2222-2222-222222222222",
+    RGIB: "33333333-3333-3333-3333-333333333333",
+    JUJ: "44444444-4444-4444-4444-444444444444",
+  };
+  const activeCampusId = campusIdMap[currentCampus] || "11111111-1111-1111-1111-111111111111";
+
+  // Real Analytics Queries via Pure Domain Engine
+  const adminAnalyticsData = useMemo(() => {
+    return analyticsService.getAdminExecutiveAnalytics(
+      {
+        semesterId: activeSemester.id,
+        campusId: adminFilters.campusId !== "ALL" ? adminFilters.campusId : undefined,
+        trackId: adminFilters.trackId !== "ALL" ? adminFilters.trackId : undefined,
+        status: adminFilters.status !== "ALL" ? adminFilters.status : undefined,
+      },
+      "2026-10-16"
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsService, activeSemester.id, adminFilters, sessionLogsVersion]);
+
+  const campusManagerAnalyticsData = useMemo(() => {
+    const data = analyticsService.getCampusManagerAnalytics(
+      activeCampusId,
+      "2026-10-16"
+    );
+    if (cmStatusFilter !== "ALL") {
+      return {
+        ...data,
+        fallingBehindSubjects: data.fallingBehindSubjects.filter((s) => s.status === cmStatusFilter),
+      };
+    }
+    return data;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsService, activeCampusId, cmStatusFilter, sessionLogsVersion]);
+
+  const facultyAnalyticsData = useMemo(() => {
+    return analyticsService.getFacultyAnalytics(
+      currentUser.id,
+      "2026-10-16"
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsService, currentUser.id, sessionLogsVersion]);
+
+  const inspectedBatchSubject = useMemo(() => {
+    if (!inspectedSubjectId) return null;
+    const allBS = isolatedDataStore.getBatchSubjects();
+    if (inspectedBatchId) {
+      const matched = allBS.find(
+        (bs) => bs.subject_id === inspectedSubjectId && bs.batch_id === inspectedBatchId
+      );
+      if (matched) return matched;
+    }
+    return allBS.find((bs) => bs.subject_id === inspectedSubjectId) || allBS[0] || null;
+  }, [inspectedSubjectId, inspectedBatchId]);
+
+  const subjectDetailAnalyticsData = useMemo(() => {
+    if (!inspectedBatchSubject) return null;
+    return analyticsService.getSubjectDetailAnalytics(
+      inspectedBatchSubject.subject_id,
+      inspectedBatchSubject.batch_id,
+      "2026-10-16"
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsService, inspectedBatchSubject, sessionLogsVersion]);
+
+  // Real Syllabus Topics from Data Store
+  const [topics, setTopics] = useState(() =>
+    isolatedDataStore.getTopics(selectedSubjectId).map((t) => ({
+      id: t.id,
+      title: t.title,
+      sequenceOrder: t.sequence_order,
+      plannedHours: t.planned_hours,
+      status: t.status,
+      percentComplete: t.percent_complete,
+      unitNumber: 1,
+      inScopeForExams: ["MID_TERM", "END_TERM"] as ExamType[],
+      plannedDate: t.planned_date,
+    }))
   );
 
-  const trackRollup = rollUpTrackProgress("Mirai Track", [progressionMetrics]);
+  // Authoritative Progression Metrics via Pure Calculation Engine
+  const progressionMetrics = useMemo(() => {
+    return calculateSubjectProgressionServer(
+      "88888888-8888-8888-8888-888888888881",
+      "77777777-7777-7777-7777-777777777771",
+      "2026-10-16",
+      isolatedDataStore
+    ).metrics;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionLogsVersion]);
+
+  const upcomingMidTerm = examWindows.find((e) => e.exam_type === "MID_TERM") || examWindows[0];
+  const examReadiness = upcomingMidTerm
+    ? calculateExamReadiness(
+        upcomingMidTerm.exam_type as ExamType,
+        upcomingMidTerm.name,
+        upcomingMidTerm.start_date,
+        topics
+      )
+    : {
+        examType: "MID_TERM" as const,
+        examName: "Mid-Term",
+        targetDate: "2026-10-21",
+        totalInScopeHours: 0,
+        coveredInScopeHours: 0,
+        remainingHoursNeeded: 0,
+        readinessPercentage: 100,
+        isReady: true,
+        inScopeTopicsCount: 0,
+      };
+
+  // Real Permitted Courses Evaluation
+  const realCourseMetrics = useMemo(() => {
+    const allBatchSubjects = isolatedDataStore.getBatchSubjects();
+    const allBatches = isolatedDataStore.getBatches();
+    const allSubjects = isolatedDataStore.getSubjects();
+
+    return allBatchSubjects
+      .filter((bs) => {
+        const batch = allBatches.find((b) => b.id === bs.batch_id);
+        if (!batch) return false;
+        if (activeCampusId && batch.campus_id !== activeCampusId) return false;
+        return true;
+      })
+      .map((bs) => {
+        const batch = allBatches.find((b) => b.id === bs.batch_id);
+        const subject = allSubjects.find((s) => s.id === bs.subject_id);
+        const serverProgression = calculateSubjectProgressionServer(
+          bs.subject_id,
+          bs.batch_id,
+          "2026-10-16",
+          isolatedDataStore
+        );
+        return {
+          batchSubjectId: bs.id,
+          subjectId: bs.subject_id,
+          batchId: bs.batch_id,
+          code: subject?.code || "SUBJ",
+          name: subject?.name || "Subject",
+          batchName: batch?.name || "Batch",
+          section: batch?.section || "A",
+          facultyName:
+            bs.subject_id === "88888888-8888-8888-8888-888888888881"
+              ? "Dr. Neha Sharma"
+              : "Prof. Rahul Verma",
+          progression: serverProgression.metrics,
+        };
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCampusId, sessionLogsVersion]);
+
+  const coursesWorstStatus = useMemo(() => {
+    if (realCourseMetrics.length === 0) return "ON_TRACK";
+    if (realCourseMetrics.some((c) => c.progression.status === "DANGER")) return "DANGER";
+    if (realCourseMetrics.some((c) => c.progression.status === "TIGHT")) return "TIGHT";
+    return "ON_TRACK";
+  }, [realCourseMetrics]);
 
   // Authorization check for current persona
   const canUserLog = canLogSession(
@@ -561,7 +720,6 @@ export default function ProspectusApp() {
       );
 
       setSessionLogsVersion((v) => v + 1);
-      setLoggedSessionsCount((c) => c + 1);
 
       if (result.updatedTopics.length > 0) {
         setTopics((prev) =>
@@ -653,246 +811,293 @@ export default function ProspectusApp() {
 
         {/* Dynamic Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-          {/* OVERVIEW SECTION */}
+          {/* OVERVIEW SECTION - Authoritative Role-Based Dashboards & Subject Detail */}
           {activeSection === "overview" && (
-            <div className="space-y-6">
-              <PageHeader
-                kicker="ACADEMIC PROGRESSION // BATCH CSE-2026-B"
-                title="Data Structures & Algorithms"
-                description={`Tracking curriculum pace across 48 planned lecture hours for ${currentCampus} campus (${currentTrack} Track).`}
-                badge={<StatusLabel status={progressionMetrics.status} size="md" />}
-                actions={
-                  canUserLog && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => openLogForSession()}
-                      className="shadow-xs"
-                    >
-                      <Clock className="h-4 w-4" />
-                      <span>Log Session (&lt;60s)</span>
-                    </Button>
-                  )
-                }
-              />
+            <div>
+              {inspectedSubjectId && subjectDetailAnalyticsData ? (
+                <SubjectDetailView
+                  data={subjectDetailAnalyticsData}
+                  onBack={() => {
+                    setInspectedSubjectId(null);
+                    setInspectedBatchId(null);
+                  }}
+                  onOpenQuickLog={() => openLogForSession()}
+                />
+              ) : currentRole === "admin" ? (
+                <AdminExecutiveDashboard
+                  data={adminAnalyticsData}
+                  onFilterChange={(f) => setAdminFilters(f)}
+                  onSelectSubject={(subId, bId) => {
+                    setInspectedSubjectId(subId);
+                    setInspectedBatchId(bId || null);
+                  }}
+                  onOpenQuickLog={() => openLogForSession()}
+                />
+              ) : currentRole === "campus_manager" ? (
+                <CampusManagerDashboard
+                  data={campusManagerAnalyticsData}
+                  onFilterChange={(f) => setCmStatusFilter(f.status || "ALL")}
+                  onSelectSubject={(subId, bId) => {
+                    setInspectedSubjectId(subId);
+                    setInspectedBatchId(bId || null);
+                  }}
+                />
+              ) : currentRole === "faculty" ? (
+                <FacultyAnalyticsDashboard
+                  data={facultyAnalyticsData}
+                  onOpenQuickLog={(sId) => {
+                    const session = sId
+                      ? isolatedDataStore.getAllScheduledSessions().find((s) => s.id === sId)
+                      : undefined;
+                    openLogForSession(session);
+                  }}
+                  onSelectSubject={(subId, bId) => {
+                    setInspectedSubjectId(subId);
+                    setInspectedBatchId(bId || null);
+                  }}
+                />
+              ) : (
+                /* Student Role - Read-only batch progression */
+                <div className="space-y-6">
+                  <PageHeader
+                    kicker="STUDENT PORTAL // BATCH CSE-2026-A"
+                    title="Curriculum Pace &amp; Exam Readiness"
+                    description={`Viewing read-only progression metrics for ${currentCampus} campus (${currentTrack} Track).`}
+                    badge={<StatusLabel status={progressionMetrics.status} size="md" />}
+                  />
+                  <ProgressRail milestones={railMilestones} />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* 1. Coverage */}
+                    <div className="card-quiet p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
+                          Syllabus Coverage
+                        </span>
+                        <BookOpen className="h-4 w-4 text-[#4965E8]" />
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
+                          {progressionMetrics.coveragePercentage}%
+                        </span>
+                        <span className="text-xs text-[#64748B]">
+                          ({progressionMetrics.coveredHours} / {progressionMetrics.totalHoursInScope}h)
+                        </span>
+                      </div>
+                      <Progress value={progressionMetrics.coveragePercentage} size="sm" variant="brand" />
+                      <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
+                        <span>In Scope: {progressionMetrics.totalHoursInScope}h</span>
+                        <span>Remaining: {progressionMetrics.remainingHours}h</span>
+                      </div>
+                    </div>
 
-              {/* Signature Visual Element 1: Academic Progress Rail */}
-              <ProgressRail milestones={railMilestones} />
+                    {/* 2. Buffer */}
+                    <div className="card-quiet p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
+                          Buffer Ratio
+                        </span>
+                        <StatusLabel status={progressionMetrics.status} size="sm" showDot={false} />
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
+                          {progressionMetrics.bufferRatio}x
+                        </span>
+                        <span className="text-xs text-[#64748B]">
+                          (&ge;1.15 On Track)
+                        </span>
+                      </div>
+                      <Progress
+                        value={Math.min(100, (progressionMetrics.bufferRatio / 1.5) * 100)}
+                        size="sm"
+                        variant={
+                          progressionMetrics.status === "DANGER"
+                            ? "danger"
+                            : progressionMetrics.status === "TIGHT"
+                            ? "warning"
+                            : "success"
+                        }
+                      />
+                      <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
+                        <span>Available: {progressionMetrics.availableHoursTillDeadline}h</span>
+                        <span>Status: {progressionMetrics.status}</span>
+                      </div>
+                    </div>
 
-              {/* 4 Core Deterministic Metric Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* 1. Syllabus Coverage */}
-                <div className="card-quiet p-5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-                      Syllabus Coverage
-                    </span>
-                    <BookOpen className="h-4 w-4 text-[#4965E8]" />
-                  </div>
-                  <div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
-                        {progressionMetrics.coveragePercentage}%
-                      </span>
-                      <span className="text-xs text-[#64748B]">
-                        ({progressionMetrics.coveredHours} / {progressionMetrics.totalHoursInScope}h)
-                      </span>
+                    {/* 3. Pace */}
+                    <div className="card-quiet p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
+                          Pace vs Plan
+                        </span>
+                        <Clock className="h-4 w-4 text-[#8878F5]" />
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span
+                          className={`text-3xl font-extrabold tracking-tight ${
+                            progressionMetrics.paceVsPlanHours >= 0
+                              ? "text-[#16836B]"
+                              : "text-[#C84B58]"
+                          }`}
+                        >
+                          {progressionMetrics.paceVsPlanHours >= 0 ? "+" : ""}
+                          {progressionMetrics.paceVsPlanHours}h
+                        </span>
+                        <span className="text-xs text-[#64748B]">vs expected</span>
+                      </div>
+                      <div className="text-[11px] text-[#64748B]">
+                        {progressionMetrics.overdueTopicsCount === 0 ? (
+                          <span className="text-[#16836B] font-medium flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" /> Zero overdue topics
+                          </span>
+                        ) : (
+                          <span className="text-[#C84B58] font-medium flex items-center gap-1">
+                            <AlertCircle className="h-3 w-3" /> {progressionMetrics.overdueTopicsCount} topic overdue
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
+                        <span>Batch: CSE 2026</span>
+                        <span>Section A</span>
+                      </div>
+                    </div>
+
+                    {/* 4. Exam */}
+                    <div className="card-quiet p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
+                          Mid-Term Readiness
+                        </span>
+                        <Award className="h-4 w-4 text-[#B87918]" />
+                      </div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
+                          {examReadiness.readinessPercentage}%
+                        </span>
+                        <span className="text-xs text-[#64748B]">{upcomingMidTerm.name}</span>
+                      </div>
+                      <Progress
+                        value={examReadiness.readinessPercentage}
+                        size="sm"
+                        variant={examReadiness.isReady ? "success" : "warning"}
+                      />
+                      <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
+                        <span>In-scope needed:</span>
+                        <span className="font-semibold text-[#172033]">
+                          {examReadiness.remainingHoursNeeded}h
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  <Progress value={progressionMetrics.coveragePercentage} size="sm" variant="brand" />
-                  <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
-                    <span>In Scope: {progressionMetrics.totalHoursInScope}h</span>
-                    <span>Remaining: {progressionMetrics.remainingHours}h</span>
-                  </div>
-                </div>
-
-                {/* 2. Buffer Ratio */}
-                <div className="card-quiet p-5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-                      Buffer Ratio
-                    </span>
-                    <StatusLabel status={progressionMetrics.status} size="sm" showDot={false} />
-                  </div>
-                  <div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
-                        {progressionMetrics.bufferRatio}x
-                      </span>
-                      <span className="text-xs text-[#64748B]">
-                        (&ge;1.15 On Track)
-                      </span>
-                    </div>
-                  </div>
-                  <Progress
-                    value={Math.min(100, (progressionMetrics.bufferRatio / 1.5) * 100)}
-                    size="sm"
-                    variant={
-                      progressionMetrics.status === "DANGER"
-                        ? "danger"
-                        : progressionMetrics.status === "TIGHT"
-                        ? "warning"
-                        : "success"
+                  <PaceIndicator
+                    coveredHours={progressionMetrics.coveredHours}
+                    expectedHoursByToday={
+                      Math.max(0, progressionMetrics.totalHoursInScope - progressionMetrics.remainingHours)
                     }
+                    totalPlannedHours={progressionMetrics.totalHoursInScope}
+                    status={progressionMetrics.status}
+                    targetFinishDate={activeSemester.end_date}
                   />
-                  <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
-                    <span>Available: {progressionMetrics.availableHoursTillDeadline}h</span>
-                    <span>Deadline: Dec 05</span>
-                  </div>
-                </div>
-
-                {/* 3. Pace Against Plan */}
-                <div className="card-quiet p-5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-                      Pace vs Plan
-                    </span>
-                    <Clock className="h-4 w-4 text-[#8878F5]" />
-                  </div>
-                  <div>
-                    <div className="flex items-baseline gap-2">
-                      <span
-                        className={`text-3xl font-extrabold tracking-tight ${
-                          progressionMetrics.paceVsPlanHours >= 0
-                            ? "text-[#16836B]"
-                            : "text-[#C84B58]"
-                        }`}
-                      >
-                        {progressionMetrics.paceVsPlanHours >= 0 ? "+" : ""}
-                        {progressionMetrics.paceVsPlanHours}h
-                      </span>
-                      <span className="text-xs text-[#64748B]">vs expected</span>
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-[#64748B]">
-                    {progressionMetrics.overdueTopicsCount === 0 ? (
-                      <span className="text-[#16836B] font-medium flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" /> Zero overdue topics
-                      </span>
-                    ) : (
-                      <span className="text-[#C84B58] font-medium flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" /> {progressionMetrics.overdueTopicsCount} topic overdue
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
-                    <span>Logged: {loggedSessionsCount} sessions</span>
-                    <span>Pre-filled from slot</span>
-                  </div>
-                </div>
-
-                {/* 4. Mid-Term Readiness */}
-                <div className="card-quiet p-5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-                      Mid-Term Readiness
-                    </span>
-                    <Award className="h-4 w-4 text-[#B87918]" />
-                  </div>
-                  <div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-3xl font-extrabold text-[#172033] tracking-tight">
-                        {examReadiness.readinessPercentage}%
-                      </span>
-                      <span className="text-xs text-[#64748B]">Oct 21</span>
-                    </div>
-                  </div>
-                  <Progress
-                    value={examReadiness.readinessPercentage}
-                    size="sm"
-                    variant={examReadiness.isReady ? "success" : "warning"}
+                  <TimetableGrid
+                    key={timetableSlotsVersion}
+                    slots={timetableSlots}
+                    saturdayRuleLabel={`${activeSemester.saturday_rule} Sat Working`}
                   />
-                  <div className="flex justify-between text-[11px] text-[#64748B] pt-2 border-t border-[#E6EAF2]">
-                    <span>In-scope needed:</span>
-                    <span className="font-semibold text-[#172033]">
-                      {examReadiness.remainingHoursNeeded}h
-                    </span>
-                  </div>
                 </div>
-              </div>
-
-              {/* Signature Visual Element 2: Polished Horizontal Pace Indicator */}
-              <PaceIndicator
-                coveredHours={progressionMetrics.coveredHours}
-                expectedHoursByToday={4.5}
-                totalPlannedHours={progressionMetrics.totalHoursInScope}
-                status={progressionMetrics.status}
-                targetFinishDate="2026-12-05"
-              />
-
-              {/* Signature Visual Element 3: Weekly Timetable Grid */}
-              <TimetableGrid
-                key={timetableSlotsVersion}
-                slots={timetableSlots}
-                saturdayRuleLabel="2nd & 4th Sat Working"
-              />
+              )}
             </div>
           )}
 
-          {/* COURSES SECTION */}
+          {/* COURSES SECTION - Data-driven with Live Progression Evaluation */}
           {activeSection === "courses" && (
             <div className="space-y-6">
               <PageHeader
                 kicker="ACADEMIC CURRICULUM // CAMPUS ROLLUP"
                 title="Active Courses &amp; Progress Summary"
-                description={`Rolled-up subject delivery status for ${currentCampus} campus. Track status reflects the worst subject.`}
-                badge={<StatusLabel status={trackRollup.worstStatus} size="md" />}
+                description={`Rolled-up subject delivery status for ${currentCampus} campus. Track status reflects the worst subject (${coursesWorstStatus}).`}
+                badge={<StatusLabel status={coursesWorstStatus} size="md" />}
               />
 
-              <div className="card-quiet p-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Code</TableHead>
-                      <TableHead>Subject Title</TableHead>
-                      <TableHead>Faculty</TableHead>
-                      <TableHead>Scope</TableHead>
-                      <TableHead>Delivered</TableHead>
-                      <TableHead>Coverage</TableHead>
-                      <TableHead>Buffer</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {SEED_SUBJECTS.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-mono font-bold text-[#4965E8]">
-                          {s.code}
-                        </TableCell>
-                        <TableCell className="font-semibold">{s.name}</TableCell>
-                        <TableCell className="text-[#64748B]">
-                          {s.code === "CS201" ? "Dr. Neha Sharma" : "Prof. Rahul Verma"}
-                        </TableCell>
-                        <TableCell className="font-mono">{s.totalPlannedHours}h</TableCell>
-                        <TableCell className="font-mono">
-                          {s.code === "CS201" ? progressionMetrics.coveredHours : 18.0}h
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="w-10 font-mono font-semibold">
-                              {s.code === "CS201" ? progressionMetrics.coveragePercentage : 42.8}%
-                            </span>
-                            <Progress
-                              value={s.code === "CS201" ? progressionMetrics.coveragePercentage : 42.8}
-                              size="sm"
-                              className="w-16 hidden sm:block"
-                            />
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono font-semibold">
-                          {s.code === "CS201" ? `${progressionMetrics.bufferRatio}x` : "1.08x"}
-                        </TableCell>
-                        <TableCell>
-                          <StatusLabel
-                            status={s.code === "CS201" ? progressionMetrics.status : "TIGHT"}
-                            size="sm"
-                          />
-                        </TableCell>
+              {realCourseMetrics.length === 0 ? (
+                <div className="card-quiet p-12 text-center space-y-3">
+                  <div className="h-10 w-10 mx-auto text-[#64748B] opacity-50 flex items-center justify-center bg-[#E6EAF2]/50 rounded-full">
+                    <BookOpen className="h-5 w-5" />
+                  </div>
+                  <h4 className="text-base font-bold text-[#172033]">
+                    No Active Subjects in {currentCampus}
+                  </h4>
+                  <p className="text-xs text-[#64748B] max-w-sm mx-auto">
+                    This campus has not yet been provisioned with course subjects or enrolled cohorts for this semester.
+                  </p>
+                </div>
+              ) : (
+                <div className="card-quiet p-4 overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Code</TableHead>
+                        <TableHead>Subject Title</TableHead>
+                        <TableHead>Batch Cohort</TableHead>
+                        <TableHead>Faculty</TableHead>
+                        <TableHead>Scope</TableHead>
+                        <TableHead>Delivered</TableHead>
+                        <TableHead>Coverage</TableHead>
+                        <TableHead>Buffer</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Action</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {realCourseMetrics.map((c) => (
+                        <TableRow key={c.batchSubjectId}>
+                          <TableCell className="font-mono font-bold text-[#4965E8]">
+                            {c.code}
+                          </TableCell>
+                          <TableCell className="font-semibold">{c.name}</TableCell>
+                          <TableCell className="text-xs text-[#64748B]">
+                            {c.batchName} ({c.section})
+                          </TableCell>
+                          <TableCell className="text-[#64748B]">
+                            {c.facultyName}
+                          </TableCell>
+                          <TableCell className="font-mono">{c.progression.totalHoursInScope}h</TableCell>
+                          <TableCell className="font-mono">{c.progression.coveredHours}h</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span className="w-10 font-mono font-semibold">
+                                {c.progression.coveragePercentage}%
+                              </span>
+                              <Progress
+                                value={c.progression.coveragePercentage}
+                                size="sm"
+                                className="w-16 hidden sm:block"
+                              />
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono font-semibold">
+                            {c.progression.bufferRatio}x
+                          </TableCell>
+                          <TableCell>
+                            <StatusLabel status={c.progression.status} size="sm" />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                setInspectedSubjectId(c.subjectId);
+                                setInspectedBatchId(c.batchId);
+                                setActiveSection("overview");
+                              }}
+                            >
+                              Inspect
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </div>
           )}
 
@@ -1064,11 +1269,11 @@ export default function ProspectusApp() {
               />
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {SEED_EXAMS.map((exam) => {
+                {examWindows.map((exam) => {
                   const readiness = calculateExamReadiness(
-                    exam.examType,
+                    exam.exam_type,
                     exam.name,
-                    exam.startDate,
+                    exam.start_date,
                     topics
                   );
 
@@ -1076,9 +1281,9 @@ export default function ProspectusApp() {
                     <div key={exam.id} className="card-quiet p-5 space-y-3">
                       <div className="flex justify-between items-start">
                         <span className="text-[10px] font-bold text-[#8878F5] uppercase tracking-wider bg-[#8878F5]/10 px-2 py-0.5 rounded">
-                          {exam.examType}
+                          {exam.exam_type}
                         </span>
-                        <span className="text-xs font-mono text-[#64748B]">{exam.startDate}</span>
+                        <span className="text-xs font-mono text-[#64748B]">{exam.start_date}</span>
                       </div>
                       <h4 className="text-sm font-bold text-[#172033] line-clamp-1">
                         {exam.name}

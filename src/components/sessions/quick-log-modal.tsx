@@ -5,7 +5,7 @@ import { Input } from "../ui/input";
 import { Select } from "../ui/select";
 import { SessionStatus } from "@/types/academic";
 import { Check, Sparkles } from "lucide-react";
-import { SEED_TOPICS_CS201 } from "@/lib/mock-data";
+import { isolatedDataStore } from "@/lib/database/service";
 
 export interface LoggedSessionPayload {
   subjectId: string;
@@ -41,8 +41,9 @@ export function QuickLogModal({
   // Pre-filled defaults (enables under 60-second completion)
   const [status, setStatus] = useState<SessionStatus>("COMPLETED");
   const [percentComplete, setPercentComplete] = useState<number>(100);
+  const availableTopics = isolatedDataStore.getTopics("88888888-8888-8888-8888-888888888881");
   const [selectedTopicId, setSelectedTopicId] = useState<string>(
-    SEED_TOPICS_CS201[2]?.id || ""
+    availableTopics[0]?.id || ""
   );
   const [actualMinutes, setActualMinutes] = useState<number>(90);
   const [classworkStatus, setClassworkStatus] = useState<"NONE" | "ASSIGNED" | "COLLECTED" | "REVIEWED">("ASSIGNED");
@@ -150,9 +151,9 @@ export function QuickLogModal({
             label="Topic Covered (from Unit 1 & 2 Syllabus)"
             value={selectedTopicId}
             onChange={(e) => setSelectedTopicId(e.target.value)}
-            options={SEED_TOPICS_CS201.map((t) => ({
+            options={availableTopics.map((t) => ({
               value: t.id,
-              label: `Seq ${t.sequenceOrder}: ${t.title} (${t.plannedHours}h)`,
+              label: `Seq ${t.sequence_order}: ${t.title} (${t.planned_hours}h)`,
             }))}
           />
         </div>
