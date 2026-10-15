@@ -125,34 +125,67 @@ export const ScheduledSessionCreateSchema = z.object({
 
 // 7. Canonical Session Log Schema
 // Enforces at most one canonical log per scheduled occurrence
-export const SessionLogCreateSchema = z.object({
-  scheduled_session_id: uuidSchema("Scheduled session ID required"),
-  batch_subject_id: uuidSchema("Batch subject ID required"),
-  faculty_id: uuidSchema("Faculty ID required"),
-  session_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  actual_start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
-  actual_end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
-  delivery_status: SessionDeliveryStatusEnum,
-  covered_summary: z.string().max(2000).optional(),
-  leftover_summary: z.string().max(2000).optional(),
-  carry_forward_topic_id: uuidSchema().optional(),
-  classwork_status: WorkStatusEnum.default("NONE"),
-  homework_status: WorkStatusEnum.default("NONE"),
-  notes: z.string().max(2000).optional(),
-  affected_topics: z
-    .array(
-      z.object({
-        topic_id: uuidSchema(),
-        percent_complete_after: z.number().min(0).max(100),
-        topic_status_after: TopicProgressStatusEnum,
-        notes: z.string().optional(),
-      })
-    )
-    .min(1, "At least one affected syllabus topic required"),
-}).refine((data) => data.actual_start_time < data.actual_end_time, {
-  message: "Actual start time must be before actual end time",
-  path: ["actual_end_time"],
-});
+export const SessionLogCreateSchema = z
+  .object({
+    scheduled_session_id: uuidSchema("Scheduled session ID required"),
+    batch_subject_id: uuidSchema("Batch subject ID required"),
+    faculty_id: uuidSchema("Faculty ID required"),
+    session_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    actual_start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+    actual_end_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/),
+    delivery_status: SessionDeliveryStatusEnum,
+    status_reason: z.string().max(1000).optional().nullable(),
+    merged_session_ids: z.array(uuidSchema()).optional().nullable(),
+    idempotency_key: z.string().max(100).optional().nullable(),
+    covered_summary: z.string().max(2000).optional().nullable(),
+    leftover_summary: z.string().max(2000).optional().nullable(),
+    carry_forward_topic_id: uuidSchema().optional().nullable(),
+    classwork_status: WorkStatusEnum.default("NONE"),
+    homework_status: WorkStatusEnum.default("NONE"),
+    notes: z.string().max(2000).optional().nullable(),
+    affected_topics: z
+      .array(
+        z.object({
+          topic_id: uuidSchema(),
+          percent_complete_after: z.number().min(0).max(100),
+          topic_status_after: TopicProgressStatusEnum,
+          notes: z.string().optional(),
+        })
+      )
+      .default([]),
+  })
+  .refine((data) => data.actual_start_time < data.actual_end_time, {
+    message: "Actual start time must be before actual end time",
+    path: ["actual_end_time"],
+  })
+  .refine(
+    (data) => {
+      if (
+        data.delivery_status === "SKIPPED" ||
+        data.delivery_status === "CANCELLED" ||
+        data.delivery_status === "MERGED"
+      ) {
+        return !!data.status_reason && data.status_reason.trim().length > 0;
+      }
+      return true;
+    },
+    {
+      message: "An explanatory reason is required when a session is skipped, cancelled, or merged.",
+      path: ["status_reason"],
+    }
+  )
+  .refine(
+    (data) => {
+      if (data.delivery_status === "COMPLETED" || data.delivery_status === "IN_PROGRESS") {
+        return data.affected_topics && data.affected_topics.length > 0;
+      }
+      return true;
+    },
+    {
+      message: "At least one affected syllabus topic required when session is delivered.",
+      path: ["affected_topics"],
+    }
+  );
 
 export type SessionLogCreateInput = z.infer<typeof SessionLogCreateSchema>;
 export type TimetableSlotCreateInput = z.infer<typeof TimetableSlotCreateSchema>;

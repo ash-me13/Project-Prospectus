@@ -17,6 +17,7 @@ import {
   DbBatchSubject,
   DbFacultyAssignment,
   ExamTypeEnum,
+  FacultyDashboardData,
 } from "../../types/database";
 import {
   SessionLogCreateSchema,
@@ -247,9 +248,35 @@ class IsolatedDataStore {
       planned_hours: 1.5,
       status: "IN_PROGRESS",
       percent_complete: 60,
-      planned_date: "2026-08-07",
+      planned_date: "2026-10-14",
       created_at: "2026-08-01T00:00:00Z",
-      updated_at: "2026-08-05T11:30:00Z",
+      updated_at: "2026-10-14T11:30:00Z",
+    },
+    {
+      id: "b0000001-1111-1111-1111-111111111104",
+      unit_id: "a0000001-1111-1111-1111-111111111111",
+      subject_id: "88888888-8888-8888-8888-888888888881",
+      sequence_order: 4,
+      title: "Stacks, Queues, and Priority Queue Deques",
+      planned_hours: 1.5,
+      status: "NOT_STARTED",
+      percent_complete: 0,
+      planned_date: "2026-10-16",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "b0000001-1111-1111-1111-111111111105",
+      unit_id: "a0000001-1111-1111-1111-111111111112",
+      subject_id: "88888888-8888-8888-8888-888888888881",
+      sequence_order: 5,
+      title: "Binary Search Trees & AVL Height Balancing",
+      planned_hours: 2.0,
+      status: "NOT_STARTED",
+      percent_complete: 0,
+      planned_date: "2026-10-19",
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-01T00:00:00Z",
     },
   ];
 
@@ -257,6 +284,7 @@ class IsolatedDataStore {
     {
       id: "d0000001-1111-1111-1111-111111111101",
       batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111111",
       faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
       session_date: "2026-08-03",
       start_time: "10:00:00",
@@ -268,6 +296,7 @@ class IsolatedDataStore {
     {
       id: "d0000001-1111-1111-1111-111111111102",
       batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111112",
       faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
       session_date: "2026-08-05",
       start_time: "10:00:00",
@@ -279,10 +308,47 @@ class IsolatedDataStore {
     {
       id: "d0000001-1111-1111-1111-111111111103",
       batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111113",
       faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
       session_date: "2026-08-07",
       start_time: "10:00:00",
       end_time: "11:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111104",
+      batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111112",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-14",
+      start_time: "10:00:00",
+      end_time: "11:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111105",
+      batch_subject_id: "99999999-1111-1111-1111-111111111111",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111113",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-16",
+      start_time: "10:00:00",
+      end_time: "11:30:00",
+      duration_hours: 1.5,
+      occurrence_status: "SCHEDULED",
+      created_at: "2026-08-01T00:00:00Z",
+    },
+    {
+      id: "d0000001-1111-1111-1111-111111111106",
+      batch_subject_id: "99999999-1111-1111-1111-111111111112",
+      timetable_slot_id: "c0000001-1111-1111-1111-111111111111",
+      faculty_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      session_date: "2026-10-16",
+      start_time: "14:00:00",
+      end_time: "15:30:00",
       duration_hours: 1.5,
       occurrence_status: "SCHEDULED",
       created_at: "2026-08-01T00:00:00Z",
@@ -575,7 +641,17 @@ class IsolatedDataStore {
       );
     }
 
-    // 3. Uniqueness Enforcement: At most one canonical log per scheduled occurrence
+    // 3. Idempotency Check: if request contains an idempotency_key that was already processed, return existing record
+    if (parsed.idempotency_key) {
+      const existingByIdempotency = this.sessionLogs.find(
+        (l) => l.idempotency_key === parsed.idempotency_key
+      );
+      if (existingByIdempotency) {
+        return { log: existingByIdempotency, updatedTopics: [] };
+      }
+    }
+
+    // 4. Uniqueness Enforcement: At most one canonical log per scheduled occurrence
     const existingLog = this.sessionLogs.find(
       (l) => l.scheduled_session_id === parsed.scheduled_session_id
     );
@@ -585,7 +661,7 @@ class IsolatedDataStore {
       );
     }
 
-    // 4. Create canonical log
+    // 5. Create canonical log
     const newLogId = `log-${Date.now()}`;
     const startParts = parsed.actual_start_time.split(":").map(Number);
     const endParts = parsed.actual_end_time.split(":").map(Number);
@@ -601,12 +677,15 @@ class IsolatedDataStore {
       actual_end_time: parsed.actual_end_time,
       duration_minutes: durationMinutes,
       delivery_status: parsed.delivery_status,
-      covered_summary: parsed.covered_summary,
-      leftover_summary: parsed.leftover_summary,
-      carry_forward_topic_id: parsed.carry_forward_topic_id,
+      status_reason: parsed.status_reason || null,
+      merged_session_ids: parsed.merged_session_ids || [],
+      idempotency_key: parsed.idempotency_key || null,
+      covered_summary: parsed.covered_summary || null,
+      leftover_summary: parsed.leftover_summary || null,
+      carry_forward_topic_id: parsed.carry_forward_topic_id || null,
       classwork_status: parsed.classwork_status,
       homework_status: parsed.homework_status,
-      notes: parsed.notes,
+      notes: parsed.notes || null,
       is_verified: true,
       logged_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -614,30 +693,52 @@ class IsolatedDataStore {
 
     this.sessionLogs.push(canonicalLog);
 
-    // Update scheduled session status
+    // 6. Update scheduled session status
     const scheduled = this.scheduledSessions.find((s) => s.id === parsed.scheduled_session_id);
     if (scheduled) {
-      scheduled.occurrence_status = "COMPLETED";
-    }
-
-    // 5. Update topic progress state (traceable, no duplicate progress counting)
-    const updatedTopics: DbSyllabusTopic[] = [];
-    for (const affected of parsed.affected_topics) {
-      const topicIndex = this.topics.findIndex((t) => t.id === affected.topic_id);
-      if (topicIndex >= 0) {
-        this.topics[topicIndex] = {
-          ...this.topics[topicIndex],
-          percent_complete: affected.percent_complete_after,
-          status: affected.topic_status_after,
-          actual_completed_date:
-            affected.percent_complete_after >= 100 ? parsed.session_date : this.topics[topicIndex].actual_completed_date,
-          updated_at: new Date().toISOString(),
-        };
-        updatedTopics.push(this.topics[topicIndex]);
+      if (parsed.delivery_status === "SKIPPED") {
+        scheduled.occurrence_status = "SKIPPED";
+      } else if (parsed.delivery_status === "CANCELLED") {
+        scheduled.occurrence_status = "CANCELLED";
+      } else {
+        scheduled.occurrence_status = "COMPLETED";
       }
     }
 
-    // 6. Append to Audit Log
+    // For merged sessions: mark referenced scheduled sessions as MERGED
+    // Planned and actual hours are not counted twice because only this single canonical log records actual minutes.
+    if (parsed.delivery_status === "MERGED" && parsed.merged_session_ids && parsed.merged_session_ids.length > 0) {
+      for (const mergedId of parsed.merged_session_ids) {
+        const mergedSession = this.scheduledSessions.find((s) => s.id === mergedId);
+        if (mergedSession) {
+          mergedSession.occurrence_status = "MERGED";
+        }
+      }
+    }
+
+    // 7. Update topic progress state (traceable, no duplicate progress counting)
+    // CRITICAL REQUIREMENT: Do not mark an entire topic as skipped just because one class session was skipped.
+    const updatedTopics: DbSyllabusTopic[] = [];
+    if (parsed.delivery_status !== "SKIPPED" && parsed.delivery_status !== "CANCELLED") {
+      for (const affected of parsed.affected_topics) {
+        const topicIndex = this.topics.findIndex((t) => t.id === affected.topic_id);
+        if (topicIndex >= 0) {
+          this.topics[topicIndex] = {
+            ...this.topics[topicIndex],
+            percent_complete: affected.percent_complete_after,
+            status: affected.topic_status_after,
+            actual_completed_date:
+              affected.percent_complete_after >= 100
+                ? parsed.session_date
+                : this.topics[topicIndex].actual_completed_date,
+            updated_at: new Date().toISOString(),
+          };
+          updatedTopics.push(this.topics[topicIndex]);
+        }
+      }
+    }
+
+    // 8. Append to Audit Log
     this.auditLogs.push({
       id: `audit-${Date.now()}`,
       table_name: "session_logs",
@@ -647,12 +748,231 @@ class IsolatedDataStore {
       new_values: {
         scheduled_session_id: parsed.scheduled_session_id,
         delivery_status: parsed.delivery_status,
+        status_reason: parsed.status_reason,
+        merged_session_ids: parsed.merged_session_ids,
         duration_minutes: durationMinutes,
+        affected_topics_count: updatedTopics.length,
       },
       timestamp: new Date().toISOString(),
     });
 
+    // 9. Recalculate Subject Planning
+    const batchSubj = this.batchSubjects.find((bs) => bs.id === parsed.batch_subject_id);
+    if (batchSubj) {
+      this.recalculateSubjectPlanning(batchSubj.subject_id, batchSubj.id);
+    }
+
     return { log: canonicalLog, updatedTopics };
+  }
+
+  public getAllScheduledSessions(): DbScheduledSession[] {
+    return this.scheduledSessions;
+  }
+
+  public getAllSessionLogs(): DbSessionLog[] {
+    return this.sessionLogs;
+  }
+
+  /**
+   * Aggregates real-time faculty dashboard data:
+   * - Today's scheduled sessions (with logged indicator)
+   * - Sessions already logged
+   * - Sessions awaiting a log
+   * - Overdue syllabus topics
+   * - Subjects requiring immediate attention
+   */
+  public getFacultyDashboardData(
+    facultyId: string,
+    todayDate: string = "2026-10-16"
+  ): FacultyDashboardData {
+    // 1. All subjects assigned to this faculty
+    const assignments = this.facultyAssignments.filter((a) => a.faculty_id === facultyId);
+    const assignedBatchSubjectIds = new Set(assignments.map((a) => a.batch_subject_id));
+
+    // Batch subjects map
+    const batchSubjectsMap = new Map(this.batchSubjects.map((bs) => [bs.id, bs]));
+    const subjectsMap = new Map(this.subjects.map((s) => [s.id, s]));
+    const batchesMap = new Map(this.batches.map((b) => [b.id, b]));
+    const slotsMap = new Map(this.timetableSlots.map((ts) => [ts.id, ts]));
+
+    // Helper to get subject details
+    const getSubjectDetails = (batchSubjectId: string) => {
+      const bs = batchSubjectsMap.get(batchSubjectId);
+      const subject = bs ? subjectsMap.get(bs.subject_id) : undefined;
+      const batch = bs ? batchesMap.get(bs.batch_id) : undefined;
+      return {
+        subject_name: subject?.name || "Data Structures & Algorithms",
+        subject_code: subject?.code || "CS201",
+        batch_name: batch?.name || "CSE 2026 Sec B",
+        subject_id: subject?.id || "88888888-8888-8888-8888-888888888881",
+        total_planned_hours: subject?.total_planned_hours || 48.0,
+      };
+    };
+
+    // 2. Today's scheduled sessions
+    const facultySessions = this.scheduledSessions.filter((s) => s.faculty_id === facultyId);
+    const loggedSessionMap = new Map(this.sessionLogs.map((l) => [l.scheduled_session_id, l]));
+
+    const todaySessions = facultySessions
+      .filter((s) => s.session_date === todayDate)
+      .map((s) => {
+        const details = getSubjectDetails(s.batch_subject_id);
+        const slot = s.timetable_slot_id ? slotsMap.get(s.timetable_slot_id) : undefined;
+        const isLogged =
+          loggedSessionMap.has(s.id) ||
+          s.occurrence_status === "COMPLETED" ||
+          s.occurrence_status === "SKIPPED" ||
+          s.occurrence_status === "CANCELLED" ||
+          s.occurrence_status === "MERGED";
+        return {
+          ...s,
+          subject_name: details.subject_name,
+          subject_code: details.subject_code,
+          batch_name: details.batch_name,
+          room: slot?.room || "Lab 3",
+          is_logged: isLogged,
+        };
+      })
+      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+    // 3. Sessions already logged
+    const loggedSessions = this.sessionLogs
+      .filter((l) => l.faculty_id === facultyId)
+      .map((l) => {
+        const details = getSubjectDetails(l.batch_subject_id);
+        const logTopics = this.topics.filter((t) => t.subject_id === details.subject_id);
+        return {
+          ...l,
+          subject_name: details.subject_name,
+          subject_code: details.subject_code,
+          batch_name: details.batch_name,
+          topic_titles: logTopics.map((t) => t.title),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.session_date.localeCompare(a.session_date) ||
+          b.actual_start_time.localeCompare(a.actual_start_time)
+      );
+
+    // 4. Sessions awaiting a log: scheduled <= todayDate and no session_log
+    const awaitingLogSessions = facultySessions
+      .filter((s) => {
+        const isPastOrToday = s.session_date <= todayDate;
+        const hasLog = loggedSessionMap.has(s.id);
+        const isClosed =
+          s.occurrence_status === "COMPLETED" ||
+          s.occurrence_status === "CANCELLED" ||
+          s.occurrence_status === "MERGED" ||
+          s.occurrence_status === "SKIPPED";
+        return isPastOrToday && !hasLog && !isClosed;
+      })
+      .map((s) => {
+        const details = getSubjectDetails(s.batch_subject_id);
+        const slot = s.timetable_slot_id ? slotsMap.get(s.timetable_slot_id) : undefined;
+        return {
+          ...s,
+          subject_name: details.subject_name,
+          subject_code: details.subject_code,
+          batch_name: details.batch_name,
+          room: slot?.room || "Lab 3",
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.session_date.localeCompare(b.session_date) ||
+          a.start_time.localeCompare(b.start_time)
+      );
+
+    // 5. Overdue topics: planned_date < todayDate and percent_complete < 100 and status !== 'COMPLETED'
+    const overdueTopics: Array<
+      DbSyllabusTopic & { subject_name: string; subject_code: string; days_overdue: number }
+    > = [];
+    const relevantSubjectIds = new Set<string>();
+    for (const batchSubjId of Array.from(assignedBatchSubjectIds)) {
+      const bs = batchSubjectsMap.get(batchSubjId);
+      if (bs) relevantSubjectIds.add(bs.subject_id);
+    }
+    // Fallback if no explicit assignments are loaded
+    if (relevantSubjectIds.size === 0) {
+      relevantSubjectIds.add("88888888-8888-8888-8888-888888888881");
+    }
+
+    for (const subjId of Array.from(relevantSubjectIds)) {
+      const subj = subjectsMap.get(subjId);
+      if (!subj) continue;
+      const subjTopics = this.topics.filter((t) => t.subject_id === subj.id);
+      for (const topic of subjTopics) {
+        if (
+          topic.planned_date &&
+          topic.planned_date < todayDate &&
+          topic.percent_complete < 100 &&
+          topic.status !== "COMPLETED"
+        ) {
+          const plannedMs = new Date(topic.planned_date).getTime();
+          const todayMs = new Date(todayDate).getTime();
+          const daysOverdue = Math.max(1, Math.round((todayMs - plannedMs) / (1000 * 60 * 60 * 24)));
+          overdueTopics.push({
+            ...topic,
+            subject_name: subj.name,
+            subject_code: subj.code,
+            days_overdue: daysOverdue,
+          });
+        }
+      }
+    }
+
+    // 6. Subjects requiring attention
+    const subjectsRequiringAttention: FacultyDashboardData["subjectsRequiringAttention"] = [];
+    for (const subjId of Array.from(relevantSubjectIds)) {
+      const subj = subjectsMap.get(subjId);
+      if (!subj) continue;
+      const bs = this.batchSubjects.find((b) => b.subject_id === subj.id);
+      const batch = bs ? batchesMap.get(bs.batch_id) : this.batches[0];
+
+      const subjTopics = this.topics.filter((t) => t.subject_id === subj.id);
+      const totalPlanned = subj.total_planned_hours || 48;
+      const deliveredHours = subjTopics.reduce(
+        (acc, t) => acc + t.planned_hours * (t.percent_complete / 100),
+        0
+      );
+      const completionPercentage = Math.round((deliveredHours / Math.max(1, totalPlanned)) * 100);
+
+      const subjOverdue = overdueTopics.filter((t) => t.subject_id === subj.id);
+      const subjUnlogged = awaitingLogSessions.filter(
+        (s) => !bs || s.batch_subject_id === bs.id
+      );
+
+      let paceStatus: "ON_TRACK" | "BEHIND" | "AT_RISK" = "ON_TRACK";
+      if (subjOverdue.length >= 2 || subjUnlogged.length >= 2) {
+        paceStatus = "AT_RISK";
+      } else if (subjOverdue.length > 0 || subjUnlogged.length > 0) {
+        paceStatus = "BEHIND";
+      }
+
+      if (paceStatus !== "ON_TRACK" || subjOverdue.length > 0 || subjUnlogged.length > 0) {
+        subjectsRequiringAttention.push({
+          subject_id: subj.id,
+          subject_code: subj.code,
+          subject_name: subj.name,
+          batch_name: batch?.name || "CSE 2026 Sec B",
+          planned_hours: totalPlanned,
+          delivered_hours: Math.round(deliveredHours * 10) / 10,
+          completion_percentage: completionPercentage,
+          pace_status: paceStatus,
+          overdue_topic_count: subjOverdue.length,
+          unlogged_session_count: subjUnlogged.length,
+        });
+      }
+    }
+
+    return {
+      todaySessions,
+      loggedSessions,
+      awaitingLogSessions,
+      overdueTopics,
+      subjectsRequiringAttention,
+    };
   }
 
   // ============================================================================

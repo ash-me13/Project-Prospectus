@@ -21,7 +21,8 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { ProgressRail, Milestone } from "@/components/progression/progress-rail";
 import { PaceIndicator } from "@/components/progression/pace-indicator";
 import { TimetableGrid } from "@/components/timetable/timetable-grid";
-import { QuickLogModal, LoggedSessionPayload } from "@/components/sessions/quick-log-modal";
+import { FacultySessionDashboard } from "@/components/sessions/faculty-session-dashboard";
+import { FacultySessionLogModal } from "@/components/sessions/faculty-session-log-modal";
 import { Toast } from "@/components/ui/toast";
 import {
   canLogSession,
@@ -38,6 +39,10 @@ import {
   SaturdayRuleType,
   CalendarEventType,
   ExamTypeEnum,
+  DbScheduledSession,
+  SessionDeliveryStatus,
+  WorkStatusEnum,
+  TopicProgressStatus,
 } from "@/types/database";
 import { isolatedDataStore } from "@/lib/database/service";
 import { SemesterSetupModal } from "@/components/admin/semester-setup-modal";
@@ -72,7 +77,14 @@ export default function ProspectusApp() {
   const [activeSection, setActiveSection] = useState<string>("overview");
   const [currentRole, setCurrentRole] = useState<UserRole>("faculty");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
-  const [isQuickLogOpen, setIsQuickLogOpen] = useState<boolean>(false);
+  const [sessionLogsVersion, setSessionLogsVersion] = useState<number>(0);
+  const [selectedSessionToLog, setSelectedSessionToLog] = useState<(DbScheduledSession & {
+    subject_name?: string;
+    subject_code?: string;
+    batch_name?: string;
+    room?: string;
+  }) | null>(null);
+  const [isFacultyLogModalOpen, setIsFacultyLogModalOpen] = useState<boolean>(false);
 
   // Academic Context State
   const [currentCampus, setCurrentCampus] = useState<string>("HITECH");
@@ -488,31 +500,111 @@ export default function ProspectusApp() {
     };
   });
 
-  // Handle Fast Session Logging
-  const handleSessionLogged = (data: LoggedSessionPayload) => {
-    setLoggedSessionsCount((c) => c + 1);
+  // Derived Faculty Dashboard Data
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _forceRerender = sessionLogsVersion;
+  const facultyDashboardData = isolatedDataStore.getFacultyDashboardData(
+    currentUser.id,
+    "2026-10-16"
+  );
 
-    // Update topic completion if logged
-    if (data.topicsCovered && data.topicsCovered.length > 0) {
-      setTopics((prev) =>
-        prev.map((t) =>
-          data.topicsCovered.includes(t.id)
-            ? { ...t, status: data.status, percentComplete: data.percentComplete }
-            : t
-        )
-      );
+  const openLogForSession = (
+    session?: DbScheduledSession & {
+      subject_name?: string;
+      subject_code?: string;
+      batch_name?: string;
+      room?: string;
     }
+  ) => {
+    if (session) {
+      setSelectedSessionToLog(session);
+    } else {
+      const target =
+        facultyDashboardData.awaitingLogSessions[0] ||
+        facultyDashboardData.todaySessions[0] ||
+        isolatedDataStore.getAllScheduledSessions()[0] ||
+        null;
+      setSelectedSessionToLog(target);
+    }
+    setIsFacultyLogModalOpen(true);
+  };
 
-    // Add toast
-    setToasts((prev) => [
-      ...prev,
-      {
-        id: `toast-${Date.now()}`,
-        type: "success",
-        title: "Session Logged in <60 Seconds",
-        message: `Successfully verified teaching session for ${data.plannedHours}h. Pacing recomputed instantly.`,
-      },
-    ]);
+  const handleSaveCanonicalSession = async (payload: {
+    scheduled_session_id: string;
+    batch_subject_id: string;
+    faculty_id: string;
+    session_date: string;
+    actual_start_time: string;
+    actual_end_time: string;
+    delivery_status: SessionDeliveryStatus;
+    status_reason?: string | null;
+    merged_session_ids?: string[] | null;
+    idempotency_key?: string | null;
+    covered_summary?: string | null;
+    leftover_summary?: string | null;
+    carry_forward_topic_id?: string | null;
+    classwork_status: WorkStatusEnum;
+    homework_status: WorkStatusEnum;
+    notes?: string | null;
+    affected_topics: Array<{
+      topic_id: string;
+      percent_complete_after: number;
+      topic_status_after: TopicProgressStatus;
+      notes?: string;
+    }>;
+  }) => {
+    try {
+      const result = isolatedDataStore.recordCanonicalSessionLog(
+        payload,
+        currentUser,
+        payload.faculty_id
+      );
+
+      setSessionLogsVersion((v) => v + 1);
+      setLoggedSessionsCount((c) => c + 1);
+
+      if (result.updatedTopics.length > 0) {
+        setTopics((prev) =>
+          prev.map((t) => {
+            const match = result.updatedTopics.find(
+              (ut) => ut.id === t.id || ut.title.toLowerCase() === t.title.toLowerCase()
+            );
+            return match
+              ? {
+                  ...t,
+                  status:
+                    match.status === "COMPLETED"
+                      ? "COMPLETED"
+                      : "IN_PROGRESS",
+                  percentComplete: match.percent_complete,
+                }
+              : t;
+          })
+        );
+      }
+
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-${Date.now()}`,
+          type: "success",
+          title: `Session Recorded (${payload.delivery_status})`,
+          message: `Saved ${result.log.duration_minutes}m teaching session to database. ${result.updatedTopics.length} topic(s) updated.`,
+        },
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `toast-err-${Date.now()}`,
+          type: "error",
+          title: "Session Logging Failed",
+          message: msg,
+        },
+      ]);
+      throw err;
+    }
   };
 
   return (
@@ -555,7 +647,7 @@ export default function ProspectusApp() {
           currentRole={currentRole}
           onRoleChange={setCurrentRole}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
-          onOpenQuickLog={() => setIsQuickLogOpen(true)}
+          onOpenQuickLog={() => openLogForSession()}
           canLog={canUserLog}
         />
 
@@ -574,7 +666,7 @@ export default function ProspectusApp() {
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => setIsQuickLogOpen(true)}
+                      onClick={() => openLogForSession()}
                       className="shadow-xs"
                     >
                       <Clock className="h-4 w-4" />
@@ -938,14 +1030,14 @@ export default function ProspectusApp() {
             <div className="space-y-6">
               <PageHeader
                 kicker="TEACHING AUDIT // RAPID CONFIRMATION"
-                title="Logged Teaching Sessions"
-                description="Verified delivery sessions recorded by faculty. Every percentage is traceable to these source records."
+                title="Faculty Session Command Center"
+                description="Verified delivery sessions recorded by faculty. Designed for sub-60s mobile entry with atomic database persistence."
                 actions={
                   canUserLog && (
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => setIsQuickLogOpen(true)}
+                      onClick={() => openLogForSession()}
                     >
                       <Clock className="h-4 w-4 mr-1.5" />
                       Log Session (&lt;60s)
@@ -954,65 +1046,11 @@ export default function ProspectusApp() {
                 }
               />
 
-              <div className="card-quiet p-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Topic Covered</TableHead>
-                      <TableHead>Classwork</TableHead>
-                      <TableHead>Homework</TableHead>
-                      <TableHead>Verification</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell className="font-mono font-semibold">2026-10-14</TableCell>
-                      <TableCell className="font-medium">CS201: Data Structures</TableCell>
-                      <TableCell className="font-mono">90 min (1.5h)</TableCell>
-                      <TableCell className="text-xs">Singly &amp; Doubly Linked Lists</TableCell>
-                      <TableCell>
-                        <span className="text-[10px] font-semibold bg-[#16836B]/10 text-[#16836B] px-1.5 py-0.5 rounded">
-                          ASSIGNED
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-[10px] font-semibold bg-[#4965E8]/10 text-[#4965E8] px-1.5 py-0.5 rounded">
-                          ASSIGNED
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs text-[#16836B] font-medium flex items-center gap-1">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Verified
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-mono font-semibold">2026-10-12</TableCell>
-                      <TableCell className="font-medium">CS201: Data Structures</TableCell>
-                      <TableCell className="font-mono">90 min (1.5h)</TableCell>
-                      <TableCell className="text-xs">Dynamic Arrays Representation</TableCell>
-                      <TableCell>
-                        <span className="text-[10px] font-semibold bg-[#16836B]/10 text-[#16836B] px-1.5 py-0.5 rounded">
-                          COLLECTED
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-[10px] font-semibold bg-[#16836B]/10 text-[#16836B] px-1.5 py-0.5 rounded">
-                          REVIEWED
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs text-[#16836B] font-medium flex items-center gap-1">
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Verified
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
+              <FacultySessionDashboard
+                dashboardData={facultyDashboardData}
+                onSelectSessionToLog={(session) => openLogForSession(session)}
+                onRefreshData={() => setSessionLogsVersion((v) => v + 1)}
+              />
             </div>
           )}
 
@@ -1238,14 +1276,14 @@ export default function ProspectusApp() {
         </main>
       </div>
 
-      {/* Rapid Session Logging Modal (<60s Mobile Flow) */}
-      <QuickLogModal
-        isOpen={isQuickLogOpen}
-        onClose={() => setIsQuickLogOpen(false)}
-        onSessionLogged={handleSessionLogged}
-        subjectCode="CS201"
-        subjectName="Data Structures & Algorithms"
-        plannedHours={1.5}
+      {/* Canonical Faculty Session Log Modal */}
+      <FacultySessionLogModal
+        isOpen={isFacultyLogModalOpen}
+        onClose={() => setIsFacultyLogModalOpen(false)}
+        scheduledSession={selectedSessionToLog}
+        syllabusTopics={isolatedDataStore.getTopics(selectedSubjectId)}
+        otherScheduledSessions={isolatedDataStore.getAllScheduledSessions()}
+        onSaveSession={handleSaveCanonicalSession}
       />
 
       {/* Admin Semester Setup Modal */}

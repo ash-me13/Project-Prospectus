@@ -16,7 +16,7 @@ export type CalendarEventType =
   | "TIMETABLE_OVERRIDE"
   | "BLACKOUT";
 export type TopicProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "SKIPPED";
-export type ScheduledOccurrenceStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED" | "RESCHEDULED";
+export type ScheduledOccurrenceStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED" | "RESCHEDULED" | "SKIPPED" | "MERGED";
 export type SessionDeliveryStatus = "COMPLETED" | "IN_PROGRESS" | "SKIPPED" | "MERGED" | "CANCELLED";
 export type WorkStatusEnum = "NONE" | "ASSIGNED" | "COLLECTED" | "REVIEWED";
 export type NotificationEventType = "MISSED_LOG_REMINDER" | "MISSED_LOG_ESCALATION" | "SCHEDULE_SHIFT" | "EXAM_ALERT";
@@ -236,6 +236,9 @@ export interface DbSessionLog {
   actual_end_time: string;
   duration_minutes: number;
   delivery_status: SessionDeliveryStatus;
+  status_reason?: string | null;
+  merged_session_ids?: string[] | null;
+  idempotency_key?: string | null;
   covered_summary?: string | null;
   leftover_summary?: string | null;
   carry_forward_topic_id?: string | null;
@@ -294,4 +297,52 @@ export interface DbAuditLog {
   new_values?: Record<string, unknown> | null;
   client_ip?: string | null;
   timestamp: string;
+}
+
+// Faculty Dashboard Summary Aggregate
+export interface FacultyDashboardData {
+  todaySessions: Array<
+    DbScheduledSession & {
+      subject_name: string;
+      subject_code: string;
+      batch_name: string;
+      room?: string;
+      is_logged: boolean;
+    }
+  >;
+  loggedSessions: Array<
+    DbSessionLog & {
+      subject_name: string;
+      subject_code: string;
+      batch_name: string;
+      topic_titles?: string[];
+    }
+  >;
+  awaitingLogSessions: Array<
+    DbScheduledSession & {
+      subject_name: string;
+      subject_code: string;
+      batch_name: string;
+      room?: string;
+    }
+  >;
+  overdueTopics: Array<
+    DbSyllabusTopic & {
+      subject_name: string;
+      subject_code: string;
+      days_overdue: number;
+    }
+  >;
+  subjectsRequiringAttention: Array<{
+    subject_id: string;
+    subject_code: string;
+    subject_name: string;
+    batch_name: string;
+    planned_hours: number;
+    delivered_hours: number;
+    completion_percentage: number;
+    pace_status: "ON_TRACK" | "BEHIND" | "AT_RISK";
+    overdue_topic_count: number;
+    unlogged_session_count: number;
+  }>;
 }
